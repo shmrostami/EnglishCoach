@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@ec/domain':
+        specifier: workspace:*
+        version: link:packages/domain
+      '@ec/learning-engine':
+        specifier: workspace:*
+        version: link:packages/learning-engine
       '@types/node':
         specifier: ^18.19.0
         version: 18.19.130

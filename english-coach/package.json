@@ -9,6 +9,8 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@ec/domain": "workspace:*",
+    "@ec/learning-engine": "workspace:*",
     "@types/node": "^18.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
