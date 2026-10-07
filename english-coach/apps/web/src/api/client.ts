@@ -1,4 +1,7 @@
-const BASE = "http://127.0.0.1:3100";
+// Same-origin: requests go through the Vite dev proxy (see vite.config.ts),
+// which forwards to the API on 127.0.0.1:3100. No hardcoded origin here, so
+// the browser never makes a cross-origin request.
+const BASE = "";
 const LEARNER_ID = "learner-1";
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {

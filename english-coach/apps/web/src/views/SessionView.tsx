@@ -18,7 +18,7 @@ export function SessionView() {
     const created = await api.createSession();
     setSessionId(created.sessionId);
     setState("STARTING");
-    const ws = new WebSocket(`ws://127.0.0.1:3100/ws/session/${created.sessionId}`);
+    const ws = new WebSocket(`${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/session/${created.sessionId}`);
     const player = await createPlayer();
     await player.start();
     const socket = new SessionSocket(ws as never, (m) => {
