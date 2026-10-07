@@ -1,15 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, ne, isNotNull, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import {
-  learners, goalsTable, skills, errorPatterns,
   sessions, utterances, observations, learningPlans,
 } from "@ec/db";
 import type { DrizzleDb } from "@ec/db";
-import {
-  LEARNER_ID, type LearnerContext, type SessionMetrics, type SessionRecord, type SessionState,
-} from "@ec/domain";
+import type { LearnerContext, SessionMetrics, SessionRecord, SessionState } from "@ec/domain";
 import { canTransition } from "../stateMachine.js";
 import { computeMetrics } from "../metrics.js";
+import { buildLearnerContext } from "../workers/context.js";
 
 export class SessionService {
   constructor(private readonly d: DrizzleDb) {}
@@ -86,36 +84,7 @@ export class SessionService {
   getLearnerContext(sessionId: string): LearnerContext {
     const s = this.d.select().from(sessions).where(eq(sessions.id, sessionId)).all()[0];
     if (!s) throw new Error(`unknown session ${sessionId}`);
-    const learner = this.d.select().from(learners).where(eq(learners.id, s.learnerId)).all()[0];
-    const plan = this.d.select().from(learningPlans)
-      .where(and(eq(learningPlans.learnerId, s.learnerId), eq(learningPlans.status, "active")))
-      .orderBy(desc(learningPlans.createdAt)).all()[0];
-    const goals = this.d.select().from(goalsTable)
-      .where(and(eq(goalsTable.learnerId, s.learnerId), eq(goalsTable.status, "active"))).all();
-    const recurring = this.d.select().from(errorPatterns)
-      .where(and(eq(errorPatterns.learnerId, s.learnerId), eq(errorPatterns.status, "active")))
-      .all()
-      .filter((e) => e.frequency >= 3 && e.confidence >= 0.75)
-      .map((e) => e.skillCode);
-    const strengths = this.d.select().from(skills)
-      .where(and(eq(skills.learnerId, s.learnerId), eq(skills.trend, "improving"))).all()
-      .map((sk) => sk.code);
-    const recent = this.d.select().from(sessions)
-      .where(and(eq(sessions.learnerId, s.learnerId), ne(sessions.id, s.id), isNotNull(sessions.topic)))
-      .orderBy(desc(sessions.startedAt)).all()
-      .slice(0, 5).map((x) => x.topic ?? "").filter(Boolean);
-    const primary = parsePrimaryTargets(plan);
-    return {
-      level: learner.estimatedLevel ?? learner.targetLevel ?? "B1",
-      goals: goals.map((g) => g.description),
-      strengths,
-      activeWeaknesses: recurring,
-      vocabularyTargets: [],
-      difficulty: plan?.difficulty ?? s.plannedDifficulty ?? 0.5,
-      correctionStyle: learner.correctionStyle,
-      recentTopics: recent,
-      currentSessionTargets: primary,
-    };
+    return buildLearnerContext(this.d, s.learnerId, sessionId, Date.now());
   }
 
   endSession(sessionId: string, now: number): { ok: boolean; reason?: string; metrics: SessionMetrics } {
@@ -138,11 +107,6 @@ export class SessionService {
     }).where(eq(sessions.id, sessionId)).run();
     return { ok: true, metrics };
   }
-}
-
-function parsePrimaryTargets(plan: { primaryTargets: string | null } | undefined): string[] {
-  if (!plan?.primaryTargets) return [];
-  try { return JSON.parse(plan.primaryTargets) as string[]; } catch { return []; }
 }
 
 function emptyMetrics(): SessionMetrics {
