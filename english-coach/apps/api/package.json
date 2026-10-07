@@ -19,7 +19,8 @@
     "@ec/domain": "workspace:*",
     "@ec/db": "workspace:*",
     "@ec/openai": "workspace:*",
-    "@ec/learning-engine": "workspace:*"
+    "@ec/learning-engine": "workspace:*",
+    "@ec/prompts": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
