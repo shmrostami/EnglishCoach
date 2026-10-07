@@ -5,7 +5,12 @@ const BASE = "";
 const LEARNER_ID = "learner-1";
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, { headers: { "Content-Type": "application/json" }, ...init });
+  // Declare application/json only when a body is actually sent — Fastify
+  // rejects a request that claims a JSON body but has an empty one
+  // (FST_ERR_CTP_EMPTY_JSON_BODY), which is what the bodyless create-session
+  // POST tripped on.
+  const headers: Record<string, string> = init?.body != null ? { "Content-Type": "application/json" } : {};
+  const res = await fetch(BASE + path, { headers, ...init });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.status === 204 ? (undefined as T) : (res.json() as Promise<T>);
 }
