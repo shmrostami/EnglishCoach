@@ -35,6 +35,27 @@ function fakeClient() {
   };
 }
 
+/**
+ * Provider seam that counts connect() calls and never closes on its own, so
+ * re-attach behavior is observable (the MockSpeechProvider re-plays its script
+ * on every connect, which masks a double-connect).
+ */
+function countingProvider() {
+  let connectCalls = 0;
+  const close = { n: 0 };
+  const provider = {
+    connect: async () => { connectCalls += 1; },
+    sendAudio: () => {},
+    sendInstruction: () => {},
+    close: () => { close.n += 1; },
+  };
+  return {
+    provider,
+    connectCalls: () => connectCalls,
+    closeCalls: () => close.n,
+  };
+}
+
 describe("RealtimeBridge", () => {
   let service: SessionService;
   let sessionId: string;
@@ -105,6 +126,55 @@ describe("RealtimeBridge", () => {
     const second = fakeClient();
     expect(bridge.attach(second as never)).toBe(true);
     bridge.destroy("test");
+  });
+
+  function closeableClient() {
+    const sent: ServerMessage[] = [];
+    const handlers: Record<string, (...a: never[]) => void> = {};
+    const socket = {
+      sent,
+      send: (msg: string) => { sent.push(JSON.parse(msg) as ServerMessage); },
+      readyState: 1,
+      on: (ev: string, cb: (...a: never[]) => void) => { handlers[ev] = cb; },
+      close: () => { /* fake socket: no real teardown */ },
+      // fire the handlers the bridge registered (e.g. "close" on socket drop)
+      emit: (ev: string) => handlers[ev]?.(),
+    };
+    return socket;
+  }
+
+  it("re-attaches to the live provider without reconnecting it (Review Focus 4)", async () => {
+    const { provider, connectCalls } = countingProvider();
+    const bridge = new RealtimeBridge({
+      sessionId, provider, service,
+      learnerContext: service.getLearnerContext(sessionId),
+      difficulty: 0.5, warmupMs: 999_999, sessionTargetMs: 999_999, onEnded: () => {},
+    });
+    const first = closeableClient();
+    expect(bridge.attach(first as never)).toBe(true);
+    expect(connectCalls()).toBe(1);
+    (first as { emit: (ev: string) => void }).emit("close"); // network blip: socket closes
+    expect(bridge.hasClient()).toBe(false);
+    const second = closeableClient();
+    expect(bridge.attach(second as never)).toBe(true);
+    expect(connectCalls()).toBe(1); // provider connection reused, not re-opened
+    expect(second.sent.at(-1)).toEqual({ t: "state", state: "WARMUP" }); // state resumes for the re-attaching client
+    bridge.destroy("test");
+  });
+
+  it("a closing client socket does not close the provider (reconnect window)", async () => {
+    const { provider, closeCalls } = countingProvider();
+    const bridge = new RealtimeBridge({
+      sessionId, provider, service,
+      learnerContext: service.getLearnerContext(sessionId),
+      difficulty: 0.5, warmupMs: 999_999, sessionTargetMs: 999_999, onEnded: () => {},
+    });
+    const socket = closeableClient();
+    bridge.attach(socket as never);
+    (socket as { emit: (ev: string) => void }).emit("close");
+    expect(closeCalls()).toBe(0); // the upstream session stays alive for a reconnect
+    bridge.destroy("test");
+    expect(closeCalls()).toBe(1); // teardown is the only thing that closes it
   });
 
   it("marks the session FAILED and notifies the client if the provider drops mid-session (Review Focus 2)", async () => {

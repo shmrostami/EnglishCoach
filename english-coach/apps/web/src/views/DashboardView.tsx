@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client.js";
 
 interface SkillRow { code: string; mastery: number; confidence: number; trend: string; observation_count: number; }
-interface PlanRow { difficulty: number; primaryTargets: string; secondaryTargets: string | null; topic: string | null; reasoning: string | null; }
+// The API sends plan targets as PARSED arrays (the route JSON.parse's the
+// stored JSON before responding) — this row must mirror the wire, not the DB.
+interface PlanRow { difficulty: number; primaryTargets: string[]; secondaryTargets: string[] | null; topic: string | null; reasoning: string | null; }
 
 export function DashboardView() {
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
@@ -17,8 +19,8 @@ export function DashboardView() {
     void api.progress().then(setProgress).catch(() => {});
   }, []);
 
-  const primary = plan ? (JSON.parse(plan.primaryTargets) as string[]) : [];
-  const secondary = plan?.secondaryTargets ? (JSON.parse(plan.secondaryTargets) as string[]) : [];
+  const primary = plan && Array.isArray(plan.primaryTargets) ? plan.primaryTargets : [];
+  const secondary = plan?.secondaryTargets && Array.isArray(plan.secondaryTargets) ? plan.secondaryTargets : [];
 
   return (
     <div>

@@ -31,6 +31,7 @@ export class RealtimeBridge {
   state: SessionState = "STARTING";
   private client: WebSocket | null = null;
   private closed = false;
+  private started = false;
   private timers: NodeJS.Timeout[] = [];
   private seq = 0;
   private muted = false;
@@ -42,8 +43,12 @@ export class RealtimeBridge {
   attach(socket: WebSocket): boolean {
     if (this.client) return false;
     this.client = socket;
-    this.start();
-    socket.on("close", () => { this.client = null; });
+    // First attach starts the session (provider connect, instructions, timers).
+    // A re-attach after a client drop must resume on the LIVE provider —
+    // calling start() again would re-connect it (leaking the upstream
+    // WebSocket in live mode) and double-arm the timers.
+    if (!this.started) { this.started = true; this.start(); }
+    socket.on("close", () => { this.client = null; }); // client drop != session end: provider stays alive for a reconnect
     socket.on("message", (raw) => {
       try { this.handleClientMessage(JSON.parse(String(raw)) as ClientMessage); } catch { /* ignore malformed */ }
     });
