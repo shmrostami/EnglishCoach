@@ -3,7 +3,7 @@ import { openDb, db, migrate, ensureSeed } from "@ec/db";
 import { SessionService } from "./services/session.js";
 import { BridgeRegistry } from "./realtime/bridge.js";
 import { buildApp, type AppDeps } from "./app.js";
-import { selectSpeechProvider, selectAnalysisProvider, type SpeechConversationProvider } from "@ec/openai";
+import { selectSpeechProvider, selectAnalysisProvider, type SpeechConversationProvider, MOCK_DEMO_SCRIPT } from "@ec/openai";
 import { JobRunner } from "./workers/jobs.js";
 import { runAnalysis } from "./workers/analysis.js";
 import { runPlanner } from "./workers/planner.js";
@@ -36,7 +36,14 @@ async function main() {
     selectSpeech: (sessionId) => {
       const existing = speechProviders.get(sessionId);
       if (existing) return existing;
-      const p = selectSpeechProvider({ PROVIDER: env.PROVIDER, OPENAI_API_KEY: env.OPENAI_API_KEY });
+      // In mock mode the "learner" is a scripted dialogue (MOCK_DEMO_SCRIPT), so
+      // the full Speak→Observe→Diagnose→Remember→Adapt loop runs end-to-end with
+      // no API key — the README's promise. selectSpeechProvider only consults the
+      // script when PROVIDER=mock; for openai the third arg is ignored.
+      const p = selectSpeechProvider(
+        { PROVIDER: env.PROVIDER, OPENAI_API_KEY: env.OPENAI_API_KEY },
+        env.PROVIDER === "mock" ? MOCK_DEMO_SCRIPT : undefined,
+      );
       speechProviders.set(sessionId, p);
       return p;
     },

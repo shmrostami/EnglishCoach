@@ -8,6 +8,27 @@ export interface MockTurn {
 }
 
 /**
+ * The scripted "learner" that makes the mock provider useful: it repeats the
+ * same past-tense error three times, so the analysis step finds a recurring
+ * error, memory records it, and the planner targets it next session — the full
+ * loop the README promises. The session itself never auto-closes: in mock mode
+ * the USER ends it (as in a real call), which is what triggers the analysis.
+ */
+export const MOCK_DEMO_SCRIPT = {
+  autoClose: false,
+  turns: [
+    { speaker: "coach", text: "Hi! Tell me about yesterday.", pauseMs: 25 },
+    { speaker: "learner", text: "Yesterday I go to work by train.", pauseMs: 25 },
+    { speaker: "coach", text: "And what did you do after work?", pauseMs: 25 },
+    { speaker: "learner", text: "Yesterday I go home and I eat dinner.", pauseMs: 25 },
+    { speaker: "coach", text: "Was it a good dinner?", pauseMs: 25 },
+    { speaker: "learner", text: "Yesterday I go to a restaurant with my friend.", pauseMs: 25,
+      toolCall: { name: "request_micro_coaching", skill: "grammar.past_tense", reason: "recurring present-form-after-past-time" } },
+    { speaker: "coach", text: "Nice. Keep chatting — end the session whenever you are done.", pauseMs: 25 },
+  ] as MockTurn[],
+};
+
+/**
  * Emits a scripted dialogue on connect. `autoClose` (default true) emits a
  * `closed` event when the script is exhausted; pass `{ turns, autoClose: false }`
  * for long-running sessions where the client ends the call.

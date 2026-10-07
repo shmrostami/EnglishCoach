@@ -1,11 +1,11 @@
 import type { AnalysisProvider, SpeechConversationProvider } from "./providers/types.js";
-import { MockSpeechProvider, type MockTurn } from "./mock/speech.js";
+import { MockSpeechProvider, MOCK_DEMO_SCRIPT, type MockTurn } from "./mock/speech.js";
 import { MockAnalysisProvider } from "./mock/analysis.js";
 import { OpenAISpeechProvider } from "./openai/speech.js";
 import { OpenAIAnalysisProvider } from "./openai/analysis.js";
 
 export * from "./providers/types.js";
-export { MockSpeechProvider, MockAnalysisProvider, OpenAISpeechProvider, OpenAIAnalysisProvider };
+export { MockSpeechProvider, MockAnalysisProvider, OpenAISpeechProvider, OpenAIAnalysisProvider, MOCK_DEMO_SCRIPT };
 export type { MockTurn };
 export { MODEL_CONFIG } from "./models.js";
 

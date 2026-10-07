@@ -4,7 +4,7 @@ import { buildApp } from "../src/app.js";
 import { openDb, db, migrate, ensureSeed } from "@ec/db";
 import { SessionService } from "../src/services/session.js";
 import { BridgeRegistry } from "../src/realtime/bridge.js";
-import { MockSpeechProvider, type MockTurn } from "@ec/openai";
+import { MockSpeechProvider, type MockTurn, selectSpeechProvider, MOCK_DEMO_SCRIPT } from "@ec/openai";
 import { LEARNER_ID } from "@ec/domain";
 
 const SCRIPT: MockTurn[] = [
@@ -60,6 +60,45 @@ describe("HTTP API", () => {
     const res = await app.inject({ method: "GET", url: `/v1/sessions/${created.sessionId}` });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveProperty("state");
+  });
+
+  it("mock mode plays the scripted demo end-to-end (README promise; the real factory wiring)", async () => {
+    // This app is built the way server.ts builds it: the speech provider comes
+    // from selectSpeechProvider with the demo script — not an injected literal.
+    // Before the fix the server passed no script, the mock auto-closed on an
+    // empty script, and every mock session ended FAILED with zero conversation.
+    const sqlite = openDb(":memory:");
+    migrate(sqlite);
+    ensureSeed(sqlite);
+    const service = new SessionService(db(sqlite));
+    const registry = new BridgeRegistry();
+    const local = await buildApp({
+      service,
+      db: db(sqlite),
+      registry,
+      selectSpeech: () => selectSpeechProvider({ PROVIDER: "mock", OPENAI_API_KEY: undefined }, MOCK_DEMO_SCRIPT),
+      env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 600_000, OPENAI_API_KEY: undefined },
+      queue: (type, sessionId) => { if (type === "analyze") endedSessions.push(sessionId); },
+    });
+    await local.listen({ port: 0, host: "127.0.0.1" });
+
+    const created = (await local.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions`, payload: {} })).json() as { sessionId: string };
+    const ws = new WebSocket(`ws://127.0.0.1:${(local.server.address() as { port: number }).port}/ws/session/${created.sessionId}`);
+    const events: any[] = [];
+    ws.on("message", (raw) => { events.push(JSON.parse(String(raw))); });
+    await new Promise<void>((resolve) => { ws.on("open", resolve); });
+    await new Promise((r) => setTimeout(r, 700)); // script: 6 turns x 25ms + toolCall
+
+    const learnerTurns = events.filter((m) => m.t === "transcript" && m.speaker === "learner");
+    expect(learnerTurns.length).toBeGreaterThanOrEqual(3); // the scripted learner spoke (recurring past-tense error)
+    expect(events.some((m) => m.t === "intervention" && m.kind === "micro_coach")).toBe(true); // tool call fired
+
+    ws.send(JSON.stringify({ t: "control", action: "end" }));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(events.some((m) => m.t === "session_ended" && m.state === "ANALYZING")).toBe(true); // client end -> analysis, not FAILED
+    expect(endedSessions.filter((s) => s === created.sessionId)).toHaveLength(1);
+    ws.close();
+    await local.close();
   });
 });
 
