@@ -137,12 +137,22 @@ importers:
       '@ec/domain':
         specifier: workspace:*
         version: link:../domain
+      '@ec/prompts':
+        specifier: workspace:*
+        version: link:../prompts
       openai:
         specifier: ^4.0.0
         version: 4.104.0(ws@8.22.0)(zod@3.25.76)
+      ws:
+        specifier: ^8.18.0
+        version: 8.22.0
       zod:
         specifier: ^3.23.0
         version: 3.25.76
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.0
+        version: 8.18.2
 
   packages/prompts: {}
 
