@@ -11,10 +11,12 @@ export function SessionView() {
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscript());
   const [note, setNote] = useState("");
   const socketRef = useRef<{ stop: () => void } | null>(null);
+  const busy = useRef(false); // end() teardown in flight — blocks a second End
 
   useEffect(() => () => socketRef.current?.stop(), []);
 
   async function start() {
+    busy.current = false;
     const created = await api.createSession();
     setSessionId(created.sessionId);
     setState("STARTING");
@@ -26,17 +28,27 @@ export function SessionView() {
       else if (m.t === "transcript") setTranscript((s) => applyTranscript(s, m));
       else if (m.t === "state") setState(m.state);
       else if (m.t === "intervention") setNote(`[${m.kind}] ${m.skill}`);
-      else if (m.t === "session_ended") setState(m.state);
-    }, (reason) => setState(`ended:${reason}`));
+      else if (m.t === "session_ended") { setState(m.state); setSessionId(null); }
+    }, (reason) => { setState(`ended:${reason}`); setSessionId(null); });
     const capture = await createCapture(16000);
     await capture.start((pcm) => socket.sendAudio(pcm)); // tested base64 path
     socket.sendControl("start");
-    socketRef.current = { stop: () => { capture.stop(); player.stop(); socket.close(); } };
+    // One-shot: both the unmount cleanup and end() call stoppers, and
+    // stopping audio contexts twice throws InvalidStateError.
+    const stopper = {
+      stop: () => { if (socketRef.current === stopper) socketRef.current = null; capture.stop(); player.stop(); socket.close(); },
+    };
+    socketRef.current = stopper;
   }
 
   async function end() {
-    if (sessionId) await api.endSession(sessionId).catch(() => {});
-    socketRef.current?.stop();
+    if (busy.current || !sessionId) return;
+    busy.current = true;
+    const id = sessionId;
+    const stopper = socketRef.current;
+    setSessionId(null); // start a new session while the old one winds down
+    try { await api.endSession(id); } catch { /* already ended — surfaced via the socket */ }
+    stopper?.stop();
   }
 
   return (

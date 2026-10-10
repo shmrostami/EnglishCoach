@@ -24,6 +24,9 @@ export async function createPlayer(): Promise<Player> {
       const float = resampleLinear(pcm16ToFloat(pcm), sampleRate, ctx.sampleRate);
       node.port.postMessage(float);
     },
-    stop() { node?.disconnect(); node = null; void ctx.close(); },
+    // Idempotent: a second stop() (e.g. the user clicks End twice) must not
+    // call close() on an already-closed AudioContext — that throws
+    // InvalidStateError as an unhandled rejection.
+    stop() { if (ctx.state === "closed") return; node?.disconnect(); node = null; void ctx.close(); },
   };
 }

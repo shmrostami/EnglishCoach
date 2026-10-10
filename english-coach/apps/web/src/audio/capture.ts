@@ -12,6 +12,7 @@ export async function createCapture(sampleRate = 16000): Promise<Capture> {
   const node = ctx.createScriptProcessor(4096, 1, 1);
   let active = false;
   let started = 0;
+  let stopped = false;
   let onFrame: (pcm: Int16Array) => void = () => {};
 
   node.onaudioprocess = (ev) => {
@@ -29,6 +30,9 @@ export async function createCapture(sampleRate = 16000): Promise<Capture> {
 
   return {
     start: async (cb) => { onFrame = cb; await ctx.resume(); active = true; started = 0; return ctx.sampleRate; },
-    stop: () => { active = false; node.disconnect(); source.disconnect(); void ctx.close(); stream.getTracks().forEach((t) => t.stop()); },
+    // Idempotent: a second stop() (e.g. the user clicks End twice) must not
+    // close an already-closed AudioContext — that throws InvalidStateError
+    // as an unhandled rejection.
+    stop: () => { if (stopped) return; stopped = true; active = false; node.disconnect(); source.disconnect(); void ctx.close(); stream.getTracks().forEach((t) => t.stop()); },
   };
 }
