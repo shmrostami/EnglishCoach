@@ -11,10 +11,14 @@ See `../Docs/implementation-spec.md` for the design and
 
 ```bash
 pnpm install
-pnpm --filter @ec/db db:init      # create + seed SQLite
 pnpm --filter @ec/api dev         # API on 127.0.0.1:3100 (PROVIDER=mock)
 pnpm --filter @ec/web dev         # web client on http://127.0.0.1:5173
 ```
+
+The SQLite database is created and seeded automatically when the API starts
+(`apps/api/data/english-coach.db`), so no separate init step is needed. The web
+server proxies `/v1` and `/ws` to the API, so the browser uses same-origin
+requests (no CORS).
 
 Open http://127.0.0.1:5173 → Start a session. In mock mode the "learner" side
 is scripted (past-tense errors included) so the full analysis → memory →
