@@ -10,45 +10,62 @@ export function SessionView() {
   const [state, setState] = useState("idle");
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscript());
   const [note, setNote] = useState("");
-  const socketRef = useRef<{ stop: () => void } | null>(null);
-  const busy = useRef(false); // end() teardown in flight — blocks a second End
+  const socketRef = useRef<{ sendControl: (a: "start" | "end" | "mute" | "unmute") => void; quiet: () => void; teardown: () => void } | null>(null);
+  const ended = useRef(false); // this session already ended (user- or server-initiated)
 
-  useEffect(() => () => socketRef.current?.stop(), []);
+  useEffect(() => () => socketRef.current?.teardown(), []);
 
   async function start() {
-    busy.current = false;
+    ended.current = false;
+    setTranscript(initialTranscript()); // a fresh session starts with a clean transcript
+    setNote("");
     const created = await api.createSession();
     setSessionId(created.sessionId);
     setState("STARTING");
     const ws = new WebSocket(`${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/session/${created.sessionId}`);
     const player = await createPlayer();
     await player.start();
+    const capture = await createCapture(16000);
+    // A socket's onclose fires asynchronously, so a previous session's close
+    // event can land after the NEXT session has started. Every handler must
+    // check the socket is still the current one before touching shared state,
+    // or a stale close wipes the new session's state and sessionId.
+    const live = () => socketRef.current === stopper;
+    const stopper = {
+      sendControl: (a: "start" | "end" | "mute" | "unmute") => socket.sendControl(a),
+      quiet: () => { capture.stop(); player.stop(); }, // silence now, keep the socket
+      // Full local teardown: idempotent (audio stops are already no-ops once
+      // stopped), and the stale-guard so a dead session can't tear down a
+      // newer one.
+      teardown: () => { if (socketRef.current === stopper) socketRef.current = null; capture.stop(); player.stop(); ws.close(); },
+    };
     const socket = new SessionSocket(ws as never, (m) => {
+      if (!live()) return;
       if (m.t === "audio") player.playBase64(m.data, m.sampleRate);
       else if (m.t === "transcript") setTranscript((s) => applyTranscript(s, m));
       else if (m.t === "state") setState(m.state);
       else if (m.t === "intervention") setNote(`[${m.kind}] ${m.skill}`);
-      else if (m.t === "session_ended") { setState(m.state); setSessionId(null); }
-    }, (reason) => { setState(`ended:${reason}`); setSessionId(null); });
-    const capture = await createCapture(16000);
+      else if (m.t === "session_ended") { ended.current = true; setState(m.state); setSessionId(null); stopper.teardown(); }
+    }, (reason) => { if (!live()) return; if (!ended.current) setState(`ended:${reason}`); setSessionId(null); stopper.teardown(); });
     await capture.start((pcm) => socket.sendAudio(pcm)); // tested base64 path
     socket.sendControl("start");
-    // One-shot: both the unmount cleanup and end() call stoppers, and
-    // stopping audio contexts twice throws InvalidStateError.
-    const stopper = {
-      stop: () => { if (socketRef.current === stopper) socketRef.current = null; capture.stop(); player.stop(); socket.close(); },
-    };
+    // Expose the stopper only once fully started, so end() can't fire in the
+    // setup window (which would stop() a not-yet-started capture, then
+    // start() its already-closing AudioContext → InvalidStateError).
     socketRef.current = stopper;
   }
 
+  // The socket is the session's lifecycle owner: `control:end` is the one
+  // message that makes the server finish the session (analysis, cleanup,
+  // closing our socket). REST `POST /end` only flips DB state and would
+  // orphan the bridge/provider — so the client ends here, not over HTTP.
   async function end() {
-    if (busy.current || !sessionId) return;
-    busy.current = true;
-    const id = sessionId;
     const stopper = socketRef.current;
-    setSessionId(null); // start a new session while the old one winds down
-    try { await api.endSession(id); } catch { /* already ended — surfaced via the socket */ }
-    stopper?.stop();
+    if (!stopper || ended.current || !sessionId) return;
+    ended.current = true;
+    setSessionId(null); // a new session can start while this one winds down
+    stopper.sendControl("end");
+    stopper.quiet(); // silence the mic + playback now; the server closes the socket
   }
 
   return (
