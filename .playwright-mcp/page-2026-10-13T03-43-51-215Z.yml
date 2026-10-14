@@ -1,0 +1,26 @@
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - link "Session" [ref=e5] [cursor=pointer]:
+      - /url: /
+    - link "Dashboard" [ref=e6] [cursor=pointer]:
+      - /url: /dashboard
+    - link "Goals" [ref=e7] [cursor=pointer]:
+      - /url: /goals
+  - generic [ref=e8]:
+    - heading "Speaking session" [level=1] [ref=e9]
+    - paragraph [ref=e10]:
+      - text: "State:"
+      - strong [ref=e11]: MICRO_COACH
+      - generic [ref=e15]: ([micro_coach] grammar.past_tense)
+    - button "Start" [disabled] [ref=e12]
+    - button "End" [ref=e13]
+    - generic [ref=e14]:
+      - paragraph [ref=e16]:
+        - strong [ref=e17]: "Coach:"
+        - text: Was it a good dinner?
+      - paragraph [ref=e18]:
+        - strong [ref=e19]: "You:"
+        - text: Yesterday I go to a restaurant with my friend.
+      - paragraph [ref=e20]:
+        - strong [ref=e21]: "Coach:"
+        - text: Nice. Keep chatting — end the session whenever you are done.

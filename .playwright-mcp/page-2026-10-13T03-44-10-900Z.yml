@@ -1,0 +1,35 @@
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - link "Session" [ref=e5] [cursor=pointer]:
+      - /url: /
+    - link "Dashboard" [ref=e6] [cursor=pointer]:
+      - /url: /dashboard
+    - link "Goals" [ref=e7] [cursor=pointer]:
+      - /url: /goals
+  - generic [ref=e8]:
+    - heading "Speaking session" [level=1] [ref=e9]
+    - paragraph [ref=e10]:
+      - text: "State:"
+      - strong [ref=e11]: MICRO_COACH
+      - generic [ref=e22]: ([micro_coach] grammar.past_tense)
+    - button "Start" [disabled] [ref=e12]
+    - button "End" [ref=e13]
+    - generic [ref=e14]:
+      - paragraph [ref=e23]:
+        - strong [ref=e24]: "You:"
+        - text: Yesterday I go to work by train.
+      - paragraph [ref=e25]:
+        - strong [ref=e26]: "Coach:"
+        - text: And what did you do after work?
+      - paragraph [ref=e27]:
+        - strong [ref=e28]: "You:"
+        - text: Yesterday I go home and I eat dinner.
+      - paragraph [ref=e29]:
+        - strong [ref=e30]: "Coach:"
+        - text: Was it a good dinner?
+      - paragraph [ref=e31]:
+        - strong [ref=e32]: "You:"
+        - text: Yesterday I go to a restaurant with my friend.
+      - paragraph [ref=e33]:
+        - strong [ref=e34]: "Coach:"
+        - text: Nice. Keep chatting — end the session whenever you are done.

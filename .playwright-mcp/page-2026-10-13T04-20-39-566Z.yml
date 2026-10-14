@@ -1,0 +1,19 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: English Coach
+    - navigation "Primary" [ref=e7]:
+      - link "Session" [ref=e8] [cursor=pointer]:
+        - /url: /
+      - link "Dashboard" [ref=e9] [cursor=pointer]:
+        - /url: /dashboard
+      - link "Goals" [ref=e10] [cursor=pointer]:
+        - /url: /goals
+  - generic [ref=e11]:
+    - heading "Let's talk" [level=1] [ref=e12]
+    - paragraph [ref=e13]: Speak freely — your coach listens, nudges, and remembers what to work on next.
+    - generic [ref=e14]:
+      - generic [ref=e15]: Ready
+      - generic [ref=e31]:
+        - button "Start speaking" [ref=e32] [cursor=pointer]
+        - button "End session" [disabled] [ref=e33]
+    - paragraph [ref=e35]: Say hello and the transcript will appear here.

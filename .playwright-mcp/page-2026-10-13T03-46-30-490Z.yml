@@ -1,0 +1,24 @@
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - link "Session" [ref=e5] [cursor=pointer]:
+      - /url: /
+    - link "Dashboard" [ref=e6] [cursor=pointer]:
+      - /url: /dashboard
+    - link "Goals" [active] [ref=e7] [cursor=pointer]:
+      - /url: /goals
+  - generic [ref=e71]:
+    - heading "Goals" [level=1] [ref=e72]
+    - list [ref=e73]:
+      - listitem [ref=e74]:
+        - text: "[fluency] Speak continuously for 5 minutes (priority 0.9) — active"
+        - button "Complete" [ref=e75]
+      - listitem [ref=e76]:
+        - text: "[grammar] Use past tense accurately (priority 0.7) — active"
+        - button "Complete" [ref=e77]
+      - listitem [ref=e78]:
+        - text: "[vocabulary] Expand active vocabulary in daily topics (priority 0.6) — active"
+        - button "Complete" [ref=e79]
+    - generic [ref=e80]:
+      - textbox "type (fluency/grammar/vocabulary)" [ref=e81]
+      - textbox "description" [ref=e82]
+      - button "Add goal" [ref=e83]

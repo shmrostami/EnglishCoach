@@ -1,0 +1,46 @@
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - link "Session" [ref=e5] [cursor=pointer]:
+      - /url: /
+    - link "Dashboard" [active] [ref=e6] [cursor=pointer]:
+      - /url: /dashboard
+    - link "Goals" [ref=e7] [cursor=pointer]:
+      - /url: /goals
+  - generic [ref=e35]:
+    - heading "Progress" [level=1] [ref=e36]
+    - paragraph [ref=e37]:
+      - text: "Level:"
+      - strong [ref=e38]: B2+
+      - text: (confidence 90%)
+    - heading "Skill mastery" [level=3] [ref=e39]
+    - table [ref=e40]:
+      - rowgroup [ref=e41]:
+        - row [ref=e42]:
+          - columnheader "Skill" [ref=e43]
+          - columnheader "Mastery" [ref=e44]
+          - columnheader "Trend" [ref=e45]
+          - columnheader "Obs" [ref=e46]
+      - rowgroup [ref=e47]:
+        - row [ref=e48]:
+          - cell "grammar.past_tense" [ref=e49]
+          - cell "35%" [ref=e50]
+          - cell "stable" [ref=e51]
+          - cell [ref=e52]
+    - generic [ref=e53]:
+      - heading "Active plan" [level=3] [ref=e54]
+      - paragraph [ref=e55]: "Topic: Talk about a book or film that changed your mind"
+      - paragraph [ref=e56]: "Primary: grammar.past_tense"
+      - paragraph [ref=e57]: "Secondary: —"
+      - paragraph [ref=e58]: "Difficulty: 72%"
+    - heading "Last sessions" [level=3] [ref=e59]
+    - list [ref=e60]:
+      - listitem [ref=e61]: Talk about a book or film that changed your mind — overall 0.7809999999999999
+      - listitem [ref=e62]: Talk about a book or film that changed your mind — overall 0.7809999999999999
+      - listitem [ref=e63]: Talk about a book or film that changed your mind — overall 0.7809999999999999
+      - listitem [ref=e64]: Talk about a book or film that changed your mind — overall 0.7809999999999999
+      - listitem [ref=e65]: Describe a difficult decision you made at work — overall 0.7809999999999999
+      - listitem [ref=e66]: Talk about a book or film that changed your mind — overall 0.7809999999999999
+      - listitem [ref=e67]: Talk about a book or film that changed your mind — overall 0.7809999999999999
+      - listitem [ref=e68]: Describe a difficult decision you made at work — overall 0.7809999999999999
+      - listitem [ref=e69]: Convince a colleague to accept a policy you both dislike — overall 0.7809999999999999
+      - listitem [ref=e70]: Convince a colleague to accept a policy you both dislike — overall 0.7809999999999999
