@@ -55,12 +55,16 @@ export function DashboardView() {
   const [skills, setSkills] = useState<SkillRow[]>([]);
   const [plan, setPlan] = useState<PlanRow | null>(null);
   const [progress, setProgress] = useState<ProgressRow[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
-    void api.profile().then(setProfile).catch(() => {});
-    void api.skills().then((s) => setSkills(s as unknown as SkillRow[])).catch(() => {});
-    void api.plan().then((p) => setPlan(p as unknown as PlanRow | null)).catch(() => {});
-    void api.progress().then((p) => setProgress(p as unknown as ProgressRow[])).catch(() => {});
+    // A failed fetch must not read as "nothing yet" — flag it, keep the
+    // sections that did load.
+    const fail = () => setLoadFailed(true);
+    void api.profile().then(setProfile).catch(fail);
+    void api.skills().then((s) => setSkills(s as unknown as SkillRow[])).catch(fail);
+    void api.plan().then((p) => setPlan(p as unknown as PlanRow | null)).catch(fail);
+    void api.progress().then((p) => setProgress(p as unknown as ProgressRow[])).catch(fail);
   }, []);
 
   const level = (profile?.estimatedLevel as string) ?? null;
@@ -81,6 +85,9 @@ export function DashboardView() {
     <section className="ec-dashboard">
       <h1 className="ec-h1">Your progress</h1>
       <p className="ec-lede">Where you stand, what you're strong at, and what the next session will work on.</p>
+      {loadFailed && (
+        <p className="ec-loadfail" role="alert">Some of your data didn't load — check that the server is running and refresh.</p>
+      )}
 
       <div className="ec-ladder">
         <div className="ec-ladder__head">

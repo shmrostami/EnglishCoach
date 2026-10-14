@@ -13,8 +13,9 @@ export function GoalsView() {
   const [goals, setGoals] = useState<GoalRow[]>([]);
   const [type, setType] = useState("");
   const [desc, setDesc] = useState("");
+  const [loadFailed, setLoadFailed] = useState(false);
 
-  const refresh = () => void api.goals().then((g) => setGoals(g as unknown as GoalRow[])).catch(() => {});
+  const refresh = () => void api.goals().then((g) => setGoals(g as unknown as GoalRow[])).catch(() => setLoadFailed(true));
   useEffect(() => { refresh(); }, []);
 
   async function add() {
@@ -29,6 +30,9 @@ export function GoalsView() {
     <section className="ec-goals-view">
       <h1 className="ec-h1">Your goals</h1>
       <p className="ec-lede">Tell the coach what you want to get better at — it shapes every session.</p>
+      {loadFailed && (
+        <p className="ec-loadfail" role="alert">Goals didn't load — check that the server is running and refresh.</p>
+      )}
 
       <div className="ec-goals">
         {goals.length === 0 && <p className="ec-empty">No goals yet. Add one below.</p>}
@@ -38,17 +42,15 @@ export function GoalsView() {
               <div className="ec-goal__head">
                 <span className="ec-goal__type">{g.type}</span>
               </div>
-              <p className="ec-goal__desc" style={{ margin: "0.4rem 0 0" }}>{g.description}</p>
+              <p className="ec-goal__desc">{g.description}</p>
             </div>
-            <div style={{ textAlign: "right" }}>
+            <div className="ec-goal__foot">
               {g.status === "completed"
                 ? <span className="ec-chip">done</span>
                 : (
                   <>
                     <span className="ec-goal__meta">priority {Math.round(g.priority * 100)}%</span>
-                    <div style={{ marginTop: 0.5 }}>
-                      <button className="ec-btn ec-btn--sm" onClick={() => void api.patchGoal(g.id, { status: "completed" }).then(refresh)}>Complete</button>
-                    </div>
+                    <button className="ec-btn ec-btn--sm" onClick={() => void api.patchGoal(g.id, { status: "completed" }).then(refresh)}>Complete</button>
                   </>
                 )}
             </div>

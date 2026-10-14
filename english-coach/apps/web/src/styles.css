@@ -9,13 +9,20 @@
   --paper-2: #fbf6ec;
   --ink: #2b211a;
   --ink-soft: #6c6155;
-  --ink-faint: #a89b8b;
+  /* must stay ≥4.5:1 on --paper: it carries real text (empty states,
+     observation counts, inactive ladder rungs, stable trends) */
+  --ink-faint: #756a5c;
   --rule: #e4d8c6;
   --rule-strong: #d3c3ac;
-  --live: #c23a2c;
+  /* darkened from #c23a2c so red text (live "You" speaker, declining
+     trends) clears 4.5:1 at small sizes */
+  --live: #a32b1f;
   --live-deep: #9c2c20;
   --live-tint: #f2ddd6;
-  --tan: #b07a3c;
+  /* darkened from #b07a3c: tan is used as TEXT on tints (chips, goal
+     type, improving trends, +deltas), which needs 4.5:1 even on
+     --tan-tint */
+  --tan: #7d4f18;
   --tan-tint: #efe2d0;
 
   /* type */
@@ -73,6 +80,7 @@ body::before {
 
 .ec-topbar {
   display: flex;
+  flex-wrap: wrap; /* wordmark and nav stack instead of overflowing at 320px */
   align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
@@ -111,6 +119,7 @@ body::before {
   transition: background 160ms ease, color 160ms ease;
 }
 .ec-navlink:hover { color: var(--ink); }
+.ec-navlink:focus-visible { outline: 2px solid var(--live); outline-offset: 2px; }
 .ec-navlink.is-active {
   background: var(--ink);
   color: var(--paper-2);
@@ -133,6 +142,12 @@ body::before {
   color: var(--ink-soft);
   margin: 0;
   font-size: 0.95rem;
+}
+
+.ec-loadfail {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+  color: var(--live-deep);
 }
 
 /* ---------- shared bits ---------- */
@@ -506,7 +521,10 @@ body::before {
   border-radius: var(--radius);
   padding: 0.9rem 1.1rem;
 }
-.ec-goal.is-done { opacity: 0.6; }
+.ec-goal.is-done {
+  opacity: 0.75; /* 0.6 dropped the goal text below the 4.5:1 contrast floor */
+  .ec-goal__desc { color: var(--ink-soft); }
+}
 .ec-goal__head {
   display: flex;
   align-items: center;
@@ -520,8 +538,15 @@ body::before {
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
 }
-.ec-goal__desc { font-size: 1rem; }
+.ec-goal__desc { margin: 0.4rem 0 0; font-size: 1rem; }
 .ec-goal__meta { font-size: 0.8rem; color: var(--ink-soft); }
+.ec-goal__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
 
 .ec-form {
   margin-top: 1.5rem;
