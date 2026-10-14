@@ -12,7 +12,12 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
 
   render() {
     if (this.state.error) {
-      return <div role="alert"><strong>Something went wrong.</strong> <p>{this.state.error.message}</p></div>;
+      return (
+        <div className="ec-error" role="alert">
+          <p className="ec-error__title">Something went wrong.</p>
+          <p className="ec-error__detail">{this.state.error.message}</p>
+        </div>
+      );
     }
     return this.props.children;
   }

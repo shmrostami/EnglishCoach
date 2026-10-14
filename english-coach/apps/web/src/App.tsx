@@ -8,12 +8,15 @@ import { GoalsView } from "./views/GoalsView.js";
 // missing data) cannot blank the rest of the app or the nav.
 export default function App() {
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 760, margin: "0 auto", padding: 24 }}>
-      <nav style={{ display: "flex", gap: 16, marginBottom: 24, borderBottom: "1px solid #ddd", paddingBottom: 8 }}>
-        <NavLink to="/">Session</NavLink>
-        <NavLink to="/dashboard">Dashboard</NavLink>
-        <NavLink to="/goals">Goals</NavLink>
-      </nav>
+    <div className="ec-app">
+      <header className="ec-topbar">
+        <span className="ec-wordmark"><span className="ec-wordmark__dot" aria-hidden="true" />English Coach</span>
+        <nav className="ec-nav" aria-label="Primary">
+          <NavLink to="/" end className={({ isActive }) => "ec-navlink" + (isActive ? " is-active" : "")}>Session</NavLink>
+          <NavLink to="/dashboard" className={({ isActive }) => "ec-navlink" + (isActive ? " is-active" : "")}>Dashboard</NavLink>
+          <NavLink to="/goals" className={({ isActive }) => "ec-navlink" + (isActive ? " is-active" : "")}>Goals</NavLink>
+        </nav>
+      </header>
       <Routes>
         <Route path="/" element={<ErrorBoundary><SessionView /></ErrorBoundary>} />
         <Route path="/dashboard" element={<ErrorBoundary><DashboardView /></ErrorBoundary>} />

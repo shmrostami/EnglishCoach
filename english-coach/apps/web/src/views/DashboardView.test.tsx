@@ -10,7 +10,10 @@ import { DashboardView } from "./DashboardView.js";
 vi.mock("../api/client.js", () => ({
   api: {
     profile: async () => ({ estimatedLevel: "B1", estimatedLevelConfidence: 0.5 }),
-    skills: async () => [{ code: "grammar.past_tense", mastery: 0.4, confidence: 0.9, trend: "improving", observation_count: 3 }],
+    // observationCount (camelCase) is the real wire shape — Drizzle
+    // serializes the snake_case column as camelCase. The old view read
+    // `observation_count`, which the API never sends.
+    skills: async () => [{ code: "grammar.past_tense", mastery: 0.4, confidence: 0.9, trend: "improving", observationCount: 3 }],
     plan: async () => ({
       difficulty: 0.45,
       primaryTargets: ["grammar.past_tense"],

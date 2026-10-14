@@ -5,20 +5,56 @@ import { createPlayer } from "../audio/player.js";
 import { SessionSocket } from "../audio/wsClient.js";
 import { initialTranscript, applyTranscript, type TranscriptState } from "../state/transcript.js";
 
+// The live state chip: server states read as plain words; "ended:<reason>"
+// is the quiet local close the client sees before the server's session_ended.
+function stateLabel(state: string): string {
+  if (state === "idle") return "Ready";
+  if (state.startsWith("ended:")) return "Ended";
+  return state;
+}
+
+function formatClock(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+const WAVE_BARS = 11;
+
 export function SessionView() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [state, setState] = useState("idle");
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscript());
   const [note, setNote] = useState("");
+  const [seconds, setSeconds] = useState(0);
   const socketRef = useRef<{ sendControl: (a: "start" | "end" | "mute" | "unmute") => void; quiet: () => void; teardown: () => void } | null>(null);
   const ended = useRef(false); // this session already ended (user- or server-initiated)
+  const startTs = useRef(0);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+
+  const isLive = sessionId !== null;
 
   useEffect(() => () => socketRef.current?.teardown(), []);
 
+  // The on-air clock ticks only while a session is running.
+  useEffect(() => {
+    if (!isLive) return;
+    const id = setInterval(() => setSeconds(Math.floor((Date.now() - startTs.current) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [isLive]);
+
+  // The transcript scrolls to the newest turn as the conversation grows.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [transcript.turns.length]);
+
   async function start() {
     ended.current = false;
-    setTranscript(initialTranscript()); // a fresh session starts with a clean transcript
     setNote("");
+    setSeconds(0);
+    startTs.current = Date.now();
+    setTranscript(initialTranscript()); // a fresh session starts with a clean transcript
     const created = await api.createSession();
     setSessionId(created.sessionId);
     setState("STARTING");
@@ -44,7 +80,7 @@ export function SessionView() {
       if (m.t === "audio") player.playBase64(m.data, m.sampleRate);
       else if (m.t === "transcript") setTranscript((s) => applyTranscript(s, m));
       else if (m.t === "state") setState(m.state);
-      else if (m.t === "intervention") setNote(`[${m.kind}] ${m.skill}`);
+      else if (m.t === "intervention") setNote(`${m.kind === "micro_coach" ? "micro-correction" : m.kind} — ${m.skill}`);
       else if (m.t === "session_ended") { ended.current = true; setState(m.state); setSessionId(null); stopper.teardown(); }
     }, (reason) => { if (!live()) return; if (!ended.current) setState(`ended:${reason}`); setSessionId(null); stopper.teardown(); });
     await capture.start((pcm) => socket.sendAudio(pcm)); // tested base64 path
@@ -69,18 +105,44 @@ export function SessionView() {
   }
 
   return (
-    <div>
-      <h1>Speaking session</h1>
-      <p>State: <strong>{state}</strong> {note && <span>({note})</span>}</p>
-      <button onClick={start} disabled={!!sessionId}>Start</button>
-      <button onClick={end} disabled={!sessionId}>End</button>
-      <div style={{ marginTop: 24, maxHeight: 400, overflowY: "auto", border: "1px solid #eee", padding: 12 }}>
+    <section className="ec-session">
+      <h1 className="ec-h1">Let's talk</h1>
+      <p className="ec-lede">Speak freely — your coach listens, nudges, and remembers what to work on next.</p>
+
+      <div className="ec-stage">
+        <div className="ec-stage__head">
+          <span className={"ec-live" + (isLive ? " is-live" : " is-idle")}>
+            <span className="ec-live__dot" aria-hidden="true" />
+            <span className="ec-live__state">{stateLabel(state)}</span>
+          </span>
+          {isLive && <span className="ec-timer">{formatClock(seconds)}</span>}
+        </div>
+
+        <div className={"ec-wave" + (isLive ? " is-live" : "")} aria-hidden="true">
+          {Array.from({ length: WAVE_BARS }).map((_, i) => (
+            <span key={i} className="ec-bar" style={{ height: `${[14, 22, 30, 24, 38, 44, 38, 24, 30, 22, 14][i]}px` }} />
+          ))}
+        </div>
+
+        <div className="ec-actions">
+          <button className="ec-btn ec-btn--primary" onClick={start} disabled={!!sessionId}>Start speaking</button>
+          <button className="ec-btn" onClick={end} disabled={!sessionId}>End session</button>
+        </div>
+
+        {note && <p className="ec-intervention">{note}</p>}
+      </div>
+
+      <div className="ec-transcript" ref={transcriptRef}>
+        {transcript.turns.length === 0 && (
+          <p className="ec-empty">{isLive ? "The conversation is starting…" : "Say hello and the transcript will appear here."}</p>
+        )}
         {transcript.turns.map((t) => (
-          <p key={t.seq} style={{ margin: "4px 0" }}>
-            <strong>{t.speaker === "learner" ? "You" : "Coach"}:</strong> {t.text}
-          </p>
+          <div key={t.seq} className={"ec-turn " + (t.speaker === "learner" ? "is-learner" : "is-coach")}>
+            <span className="ec-turn__name">{t.speaker === "learner" ? "You" : "Coach"}</span>
+            <span className="ec-turn__text">{t.text}</span>
+          </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
