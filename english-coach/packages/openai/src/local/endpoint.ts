@@ -34,8 +34,6 @@ export class VoiceEndpoint {
   push(frame: Buffer): EndpointSpan | null {
     const at = this.now();
     const f = { rms: rms(frame), at };
-    this.frames.push(f);
-    if (this.frames.length > 16) this.frames.shift();
 
     const threshold = Math.max(this.floor * 3, 0.0005);
     const voiced = f.rms >= threshold;
@@ -45,12 +43,13 @@ export class VoiceEndpoint {
       this.buffer.push(frame);
       this.voicedFrames += 1;
       this.lastVoicedAt = at;
-    }
-
-    // Adaptive floor: silent frames only — the rolling average of the recent
-    // window tracks ambient noise, so a real utterance (above floor × 3) still
-    // registers after the tail of the last one.
-    if (!voiced) {
+    } else {
+      // Noise window: silent frames only. Voiced frames are kept out so the
+      // floor (threshold = floor × 3) never rises toward the speaker's own
+      // volume — otherwise speech resuming after a < ~320 ms pause is read as
+      // silence and the turn is truncated.
+      this.frames.push(f);
+      if (this.frames.length > 16) this.frames.shift();
       const avg = this.frames.reduce((a, x) => a + x.rms, 0) / this.frames.length;
       this.floor = Math.max(avg, 0.0001);
     }

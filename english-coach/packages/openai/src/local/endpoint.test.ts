@@ -27,6 +27,23 @@ describe("VoiceEndpoint", () => {
     expect(span.audio.length).toBe(10 * 1600 * 2); // the voiced frames only
   });
 
+  it("keeps a turn open across a short (< 600 ms) pause, then closes it", () => {
+    let t = 1_000_000;
+    const ep = new VoiceEndpoint({ now: () => t });
+    const spans: ReturnType<typeof ep.push>[] = [];
+    // 1 s of speech, a 200 ms pause (well under 600 ms), then 0.5 s more speech,
+    // then 1.4 s of silence. The pause must NOT close the turn: the resumed
+    // speech is read as voiced (the noise floor never rises to the speaker's
+    // own level), so the whole thing is ONE span and the audio holds all voiced frames.
+    for (let i = 0; i < 10; i++) { ep.push(frame(1600, 12000)); t += 100; }
+    for (let i = 0; i < 2; i++) { const s = ep.push(frame(1600, 0)); if (s) spans.push(s); t += 100; }
+    for (let i = 0; i < 5; i++) { const s = ep.push(frame(1600, 12000)); if (s) spans.push(s); t += 100; }
+    for (let i = 0; i < 14; i++) { const s = ep.push(frame(1600, 0)); if (s) spans.push(s); t += 100; }
+    expect(spans.filter(Boolean)).toHaveLength(1); // one turn, not two
+    const span = spans.find(Boolean) as EndpointSpan;
+    expect(span.audio.length).toBe(15 * 1600 * 2); // 10 + 5 voiced frames, the pause excluded
+  });
+
   it("drops clicks shorter than 300 ms of voiced audio", () => {
     let t = 0;
     const ep = new VoiceEndpoint({ now: () => t });
