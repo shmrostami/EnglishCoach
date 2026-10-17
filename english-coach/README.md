@@ -49,9 +49,9 @@ ollama pull llama3.2:3b
 cp .env.example .env    # then set PROVIDER=local
 ```
 
-On first session the two models download once (~240 MB Whisper small,
-~60 MB Piper voice, into `apps/api/data/piper`). Point the LLM elsewhere by
-editing `LLM_BASE_URL` / `LLM_MODEL` in `.env`.
+On first session the two models download once: ~240 MB Whisper small into
+the HuggingFace cache, and ~60 MB Piper voice into `apps/api/data/piper`.
+Point the LLM elsewhere by editing `LLM_BASE_URL` / `LLM_MODEL` in `.env`.
 
 | Variable | Default | What it sets |
 | --- | --- | --- |
@@ -65,7 +65,8 @@ editing `LLM_BASE_URL` / `LLM_MODEL` in `.env`.
 
 Expect ~8–15 s from you stopping talking to the coach's voice (CPU). If a
 session ends FAILED, the UI shows why: `stt_unavailable` (install the Python
-deps / fix `PYTHON`), `voice_engine_lost` (the sidecar died), or
+deps / fix `PYTHON`), `voice_engine_lost` (the sidecar died, or a
+transcribe request failed while it was alive), or
 `coach_unavailable` (LLM endpoint unreachable after one retry).
 
 Known limits: end-of-session analysis/planning still run on the mock
