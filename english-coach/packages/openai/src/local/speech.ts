@@ -39,6 +39,11 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
   private readonly now: () => number;
   private history: OpenAI.ChatCompletionMessageParam[] = [];
   private warmup = "";
+  // Learner turns run one at a time, in arrival order. A second span can land
+  // while turn 1 is still awaiting the (slow) LLM; without this chain two
+  // pacers would emit audio into the same ring buffer at once and two
+  // continuations would scramble `history`. Each turn awaits the previous one.
+  private turnChain = Promise.resolve();
 
   constructor(private readonly opts: LocalProviderOptions) {
     this.now = opts.now ?? Date.now;
@@ -67,7 +72,13 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
   sendAudio(pcm16: Buffer): void {
     if (this.closed) return;
     const span = this.endpoint.push(pcm16);
-    if (span) void this.handleLearnerTurn(span.audio);
+    if (span) {
+      // Queue behind the previous turn so a barge-in can't interleave two
+      // coaches' audio or reorder `history`. A turn can only reject if the
+      // bridge callback throws (our code never does) — swallow it so one bad
+      // turn can't poison the chain and silently drop every later turn.
+      this.turnChain = this.turnChain.then(() => this.handleLearnerTurn(span.audio)).catch(() => {});
+    }
   }
 
   sendInstruction(text: string): void {
