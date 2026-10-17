@@ -13,7 +13,7 @@ export type ServerMessage =
   | { t: "transcript"; speaker: "learner" | "coach"; text: string; seq: number; startedAt: number; endedAt: number }
   | { t: "state"; state: SessionState }
   | { t: "intervention"; kind: "micro_coach" | "target_retry" | "challenge"; skill: string }
-  | { t: "session_ended"; state: SessionState };
+  | { t: "session_ended"; state: SessionState; reason?: string };
 
 interface BridgeOpts {
   sessionId: string;
@@ -167,12 +167,11 @@ export class RealtimeBridge {
       this.opts.service.transition(this.opts.sessionId, "FAILED", Date.now());
     }
     this.state = state;
-    this.send({ t: "session_ended", state });
+    this.send({ t: "session_ended", state, reason: reason === "ended" ? undefined : reason });
     if (state === "ANALYZING") this.opts.onEnded({ state });
     this.client?.close();
     this.client = null;
     this.opts.onCleanup?.(this.opts.sessionId);
-    void reason;
   }
 
   destroy(reason: string): void {

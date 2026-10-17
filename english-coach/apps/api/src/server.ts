@@ -41,7 +41,17 @@ async function main() {
       // no API key — the README's promise. selectSpeechProvider only consults the
       // script when PROVIDER=mock; for openai the third arg is ignored.
       const p = selectSpeechProvider(
-        { PROVIDER: env.PROVIDER, OPENAI_API_KEY: env.OPENAI_API_KEY },
+        {
+          PROVIDER: env.PROVIDER,
+          OPENAI_API_KEY: env.OPENAI_API_KEY,
+          LLM_BASE_URL: env.LLM_BASE_URL,
+          LLM_MODEL: env.LLM_MODEL,
+          LLM_API_KEY: env.LLM_API_KEY,
+          WHISPER_MODEL: env.WHISPER_MODEL,
+          PIPER_VOICE: env.PIPER_VOICE,
+          PIPER_DATA_DIR: env.PIPER_DATA_DIR,
+          PYTHON: env.PYTHON,
+        },
         env.PROVIDER === "mock" ? MOCK_DEMO_SCRIPT : undefined,
       );
       speechProviders.set(sessionId, p);

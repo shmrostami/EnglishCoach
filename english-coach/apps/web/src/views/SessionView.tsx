@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client.js";
-import { createCapture } from "../audio/capture.js";
-import { createPlayer } from "../audio/player.js";
+import { createCapture, type Capture } from "../audio/capture.js";
+import { createPlayer, type Player } from "../audio/player.js";
 import { SessionSocket } from "../audio/wsClient.js";
 import { initialTranscript, applyTranscript, type TranscriptState } from "../state/transcript.js";
 
@@ -59,36 +59,66 @@ export function SessionView() {
     setSessionId(created.sessionId);
     setState("STARTING");
     const ws = new WebSocket(`${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/session/${created.sessionId}`);
-    const player = await createPlayer();
-    await player.start();
-    const capture = await createCapture(16000);
     // A socket's onclose fires asynchronously, so a previous session's close
     // event can land after the NEXT session has started. Every handler must
     // check the socket is still the current one before touching shared state,
     // or a stale close wipes the new session's state and sessionId.
     const live = () => socketRef.current === stopper;
+    // The server starts streaming the moment the socket connects, so the
+    // message handler and socketRef must be in place SYNCHRONOUSLY here —
+    // before any await — or the early transcript frames are dropped while
+    // createCapture() is still blocked on the mic-permission prompt.
+    // Hoisted above stopper so an early close/audio frame (arriving in the
+    // await gap before the audio objects exist) can null-chain instead of
+    // throwing a TDZ ReferenceError that the WS layer would swallow.
+    let player: Player | null = null;
+    let capture: Capture | null = null;
+    const pending: ("start" | "end" | "mute" | "unmute")[] = [];
     const stopper = {
-      sendControl: (a: "start" | "end" | "mute" | "unmute") => socket.sendControl(a),
-      quiet: () => { capture.stop(); player.stop(); }, // silence now, keep the socket
+      // Queue control sent before the socket is OPEN (flushed in onopen), so
+      // an early End click can't throw InvalidStateError on a closed socket.
+      sendControl: (a: "start" | "end" | "mute" | "unmute") => {
+        if (ws.readyState === WebSocket.OPEN) socket.sendControl(a);
+        else pending.push(a);
+      },
+      quiet: () => { capture?.stop(); player?.stop(); }, // silence now, keep the socket
       // Full local teardown: idempotent (audio stops are already no-ops once
       // stopped), and the stale-guard so a dead session can't tear down a
       // newer one.
-      teardown: () => { if (socketRef.current === stopper) socketRef.current = null; capture.stop(); player.stop(); ws.close(); },
+      teardown: () => { if (socketRef.current === stopper) socketRef.current = null; capture?.stop(); player?.stop(); ws.close(); },
     };
     const socket = new SessionSocket(ws as never, (m) => {
       if (!live()) return;
-      if (m.t === "audio") player.playBase64(m.data, m.sampleRate);
+      if (m.t === "audio") player?.playBase64(m.data, m.sampleRate);
       else if (m.t === "transcript") setTranscript((s) => applyTranscript(s, m));
       else if (m.t === "state") setState(m.state);
       else if (m.t === "intervention") setNote(`${m.kind === "micro_coach" ? "micro-correction" : m.kind} — ${m.skill}`);
-      else if (m.t === "session_ended") { ended.current = true; setState(m.state); setSessionId(null); stopper.teardown(); }
+      else if (m.t === "session_ended") { ended.current = true; setState(m.state); if (m.reason) setNote(`Session ended: ${m.reason}`); setSessionId(null); stopper.teardown(); }
     }, (reason) => { if (!live()) return; if (!ended.current) setState(`ended:${reason}`); setSessionId(null); stopper.teardown(); });
-    await capture.start((pcm) => socket.sendAudio(pcm)); // tested base64 path
-    socket.sendControl("start");
-    // Expose the stopper only once fully started, so end() can't fire in the
-    // setup window (which would stop() a not-yet-started capture, then
-    // start() its already-closing AudioContext → InvalidStateError).
+    ws.onopen = () => { for (const a of pending.splice(0)) socket.sendControl(a); };
     socketRef.current = stopper;
+    // Audio setup comes after: it may block on the mic-permission prompt for
+    // seconds, and the transcript must already be captured by then. If the
+    // session ends while the prompt is up, close what we created and bail out
+    // before resuming an already-closed AudioContext (InvalidStateError).
+    // ended.current is set synchronously by end(); re-checking it after each
+    // await stops us from resuming an AudioContext the user already closed.
+    player = await createPlayer();
+    if (!live() || ended.current) { player.stop(); return; }
+    await player.start();
+    try {
+      capture = await createCapture(16000);
+    } catch {
+      // Mic permission denied (getUserMedia rejects). Coach audio and the
+      // transcript still work — keep the session, just note the missing mic.
+      // (The player's AudioContext is closed by teardown when the session ends.)
+      if (live() && !ended.current) setNote("Microphone unavailable — you can hear and read the coach, but you can't speak.");
+      return;
+    }
+    if (!live() || ended.current) { capture.stop(); player.stop(); return; }
+    await capture.start((pcm) => socket.sendAudio(pcm)); // tested base64 path
+    if (!live() || ended.current) { capture.stop(); player.stop(); return; }
+    stopper.sendControl("start");
   }
 
   // The socket is the session's lifecycle owner: `control:end` is the one

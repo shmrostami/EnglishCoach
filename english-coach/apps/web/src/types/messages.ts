@@ -7,4 +7,4 @@ export type ServerMessage =
   | { t: "transcript"; speaker: "learner" | "coach"; text: string; seq: number; startedAt: number; endedAt: number }
   | { t: "state"; state: string }
   | { t: "intervention"; kind: "micro_coach" | "target_retry" | "challenge"; skill: string }
-  | { t: "session_ended"; state: string };
+  | { t: "session_ended"; state: string; reason?: string };
