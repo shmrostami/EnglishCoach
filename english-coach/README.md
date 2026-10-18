@@ -67,7 +67,7 @@ Expect ~8–15 s from you stopping talking to the coach's voice (CPU). If a
 session ends FAILED, the UI shows why: `stt_unavailable` (install the Python
 deps / fix `PYTHON`), `voice_engine_lost` (the sidecar died, or a
 transcribe request failed while it was alive), or
-`coach_unavailable` (LLM endpoint unreachable after one retry).
+`coach_unavailable` (LLM endpoint unreachable after one retry, or it answered but returned no usable text).
 
 Known limits: end-of-session analysis/planning still run on the mock
 provider, and Whisper may mis-transcribe non-English slips.

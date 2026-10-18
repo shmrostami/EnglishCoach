@@ -7,13 +7,15 @@ export interface Player {
 }
 
 export async function createPlayer(): Promise<Player> {
-  // Both real TTS backends emit 22050 Hz (Piper en_US-ryan-medium; OpenAI
-  // tts-1's default), so run the context at that native rate: playBase64's
-  // resampleLinear hits its inRate===outRate fast path (no JS resampling) and
-  // the browser's band-limited output resampler handles 22050→device. Naive
-  // linear 22050→48000 upsample would inject spectral images that read as a
-  // hissy/metallic shimmer on the voice. (Mock chunks are 16 kHz silence —
-  // zeros resample to zeros, so the one mismatched case is harmless.)
+  // The local backend (Piper en_US-ryan-medium) emits 22050 Hz, so run the
+  // context at that native rate: its playBase64 resampleLinear hits the
+  // inRate===outRate fast path (no JS resampling) and the browser's
+  // band-limited output resampler handles 22050→device. A naive linear
+  // 22050→48000 upsample would inject spectral images that read as a
+  // hissy/metallic shimmer. The OpenAI Realtime backend emits 24 kHz, so its
+  // path takes a 24000→22050 resample here — a downsample, which does not
+  // create the wide-band spectral images an upsample does. (Mock chunks are
+  // 16 kHz silence — zeros resample to zeros, so that case is harmless.)
   const ctx = new AudioContext({ sampleRate: 22050 });
   await ctx.audioWorklet.addModule(new URL("./worklet.js", import.meta.url).toString());
   let node: AudioWorkletNode | null = null;
