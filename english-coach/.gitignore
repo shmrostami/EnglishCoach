@@ -7,3 +7,5 @@ dist/
 .env
 .env.local
 apps/api/data/
+__pycache__/
+*.pyc
