@@ -179,10 +179,20 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
 
   private async emitPacedAudio(pcm: Buffer, sampleRate: number): Promise<void> {
     const samplesPerFrame = Math.max(1, Math.round((sampleRate * this.frameMs) / 1000));
-    for (let off = 0; off + samplesPerFrame * 2 <= pcm.length; off += samplesPerFrame * 2) {
+    // Pace on an ABSOLUTE deadline, not sleep-after-send: each frame carries
+    // frameMs of audio, so the send period must be frameMs too. Sleeping
+    // frameMs *after* the send adds the per-frame cost (JSON + WS write) to
+    // the period — measured 32 ms for 20 ms frames — and the client's ~170 ms
+    // ring buffer starves, which is heard as crackle/noise.
+    // Real wall clock on purpose: `now` is the injectable ENDPOINT clock and
+    // is frozen in tests, which would turn this into ever-growing sleeps.
+    const start = Date.now();
+    let n = 0;
+    for (let off = 0; off + samplesPerFrame * 2 <= pcm.length; off += samplesPerFrame * 2, n++) {
       if (this.closed) return;
       this.onEvent?.({ t: "audio", data: pcm.subarray(off, off + samplesPerFrame * 2), sampleRate });
-      await sleep(this.frameMs);
+      const wait = start + (n + 1) * this.frameMs - Date.now();
+      if (wait > 0) await sleep(wait);
     }
   }
 }

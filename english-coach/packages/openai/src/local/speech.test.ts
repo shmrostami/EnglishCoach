@@ -191,6 +191,31 @@ describe("LocalSpeechProvider", () => {
     sidecar.close();
   }, 10_000);
 
+  it("paces audio at realtime: frames must not take longer than the audio they carry", async () => {
+    // Regression: sleep-after-send made the period frameMs + per-frame cost
+    // (32 ms measured for 20 ms frames), so the client's ~170 ms ring buffer
+    // starved continuously — heard as crackle/noise over clean TTS audio.
+    // frameMs is 5 here purely to keep the test fast; the ratio is what matters.
+    const { p, sidecar, events, feedFrames } = makeProvider(script, { frameMs: 5 });
+    const stamps: number[] = [];
+    p.connect((e) => {
+      events.push(e);
+      if (e.t === "audio") stamps.push(Date.now());
+    });
+    await settle(50);
+    feedFrames(10, 8);
+    await settle(2500); // 1 s of stub audio at frameMs=5 => ~200 frames
+    expect(stamps.length).toBeGreaterThan(100); // it actually streamed
+    // Realtime ratio over the span the frames cover: audio time carried vs
+    // wall time elapsed. Sleep-after-send gave ~0.63 (20 ms of audio every
+    // 32 ms); deadline pacing keeps this at or above 1.
+    const span = (stamps[stamps.length - 1] - stamps[0]) / 1000;
+    const audioSeconds = (stamps.length * 5) / 1000;
+    expect(audioSeconds / span).toBeGreaterThan(0.9);
+    p.close();
+    sidecar.close();
+  }, 15_000);
+
   it("Piper failing after the LLM succeeded: coach text lands, no audio, session keeps going (no closed event)", async () => {
     const { p, sidecar, events, feedFrames } = makeProvider(scriptFail); // tts-always-fails fake; the LLM is still the working stub
     p.connect((e) => events.push(e));
