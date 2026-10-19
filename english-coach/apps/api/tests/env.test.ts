@@ -28,6 +28,9 @@ describe("loadEnv", () => {
     expect(e.WHISPER_MODEL).toBe("small");
     expect(e.PIPER_VOICE).toBe("en_US-ryan-medium");
     expect(e.PIPER_DATA_DIR).toBe("data/piper");
+    expect(e.TTS_ENGINE).toBe("piper");
+    expect(e.KOKORO_VOICE).toBe("af_heart");
+    expect(e.KOKORO_DATA_DIR).toBe("data/kokoro");
   });
 
   it("reads values from .env (the README's cp .env.example .env promise)", () => {

@@ -14,6 +14,9 @@ export interface Env {
   WHISPER_MODEL?: string;
   PIPER_VOICE?: string;
   PIPER_DATA_DIR?: string;
+  TTS_ENGINE?: "piper" | "kokoro";
+  KOKORO_VOICE?: string;
+  KOKORO_DATA_DIR?: string;
   PYTHON?: string;
 }
 
@@ -61,6 +64,9 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): Env {
     WHISPER_MODEL: e.WHISPER_MODEL ?? "small",
     PIPER_VOICE: e.PIPER_VOICE ?? "en_US-ryan-medium",
     PIPER_DATA_DIR: e.PIPER_DATA_DIR ?? "data/piper",
+    TTS_ENGINE: (e.TTS_ENGINE as Env["TTS_ENGINE"]) ?? "piper",
+    KOKORO_VOICE: e.KOKORO_VOICE ?? "af_heart",
+    KOKORO_DATA_DIR: e.KOKORO_DATA_DIR ?? "data/kokoro",
     PYTHON: e.PYTHON ?? "python",
   };
 }

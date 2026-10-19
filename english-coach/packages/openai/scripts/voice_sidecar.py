@@ -55,6 +55,19 @@ def _load_piper(voice, data_dir):
     return PiperVoice.load(str(model_path))  # finds {voice}.onnx.json automatically
 
 
+def _load_kokoro(model_dir, voice_name):
+    from pathlib import Path
+    import kokoro_onnx
+
+    mdir = Path(model_dir)
+    model_path = mdir / "kokoro-v1.0.onnx"
+    voices_path = mdir / "voices-v1.0.bin"
+    for p in (model_path, voices_path):
+        if not p.exists():
+            raise RuntimeError(f"TTS_ENGINE=kokoro: missing {p} (download kokoro-v1.0.onnx + voices-v1.0.bin)")
+    return kokoro_onnx.Kokoro(str(model_path), str(voices_path)), voice_name
+
+
 def _do_stt(model, audio_hex):
     import numpy as np
 
@@ -78,6 +91,9 @@ def main():
     whisper_model = os.environ.get("WHISPER_MODEL", "small")
     piper_voice = os.environ.get("PIPER_VOICE", "en_US-ryan-medium")
     piper_dir = os.environ.get("PIPER_DATA_DIR", "data/piper")
+    tts_engine = os.environ.get("TTS_ENGINE", "piper")
+    kokoro_dir = os.environ.get("KOKORO_DATA_DIR", "data/kokoro")
+    kokoro_voice = os.environ.get("KOKORO_VOICE", "af_heart")
 
     model = _load_whisper(whisper_model)  # may raise -> top handler -> fatal line
 
@@ -111,15 +127,26 @@ def main():
         elif op == "tts":
             try:
                 if piper is None:
-                    piper = _load_piper(piper_voice, piper_dir)
-                from piper import SynthesisConfig
+                    if tts_engine == "kokoro":
+                        piper = _load_kokoro(kokoro_dir, kokoro_voice)
+                    else:
+                        piper = _load_piper(piper_voice, piper_dir)
+                if tts_engine == "kokoro":
+                    import numpy as np
 
-                pcm = bytearray()
-                sample_rate = 22050
-                for chunk in piper.synthesize(req["text"], SynthesisConfig()):
-                    sample_rate = chunk.sample_rate
-                    pcm.extend(chunk.audio_int16_bytes)
-                _say({"ok": True, "id": req.get("id"), "audio": bytes(pcm).hex(), "sampleRate": sample_rate})
+                    engine, vname = piper
+                    samples, sample_rate = engine.create(req["text"], voice=vname, lang="en-us")
+                    pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
+                else:
+                    from piper import SynthesisConfig
+
+                    pcm = bytearray()
+                    sample_rate = 22050
+                    for chunk in piper.synthesize(req["text"], SynthesisConfig()):
+                        sample_rate = chunk.sample_rate
+                        pcm.extend(chunk.audio_int16_bytes)
+                    pcm = bytes(pcm)
+                _say({"ok": True, "id": req.get("id"), "audio": pcm.hex(), "sampleRate": sample_rate})
             except Exception as e:  # noqa: BLE001
                 _say({"ok": False, "id": req.get("id"), "error": f"tts: {e!r}"})
         else:

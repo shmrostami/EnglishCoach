@@ -26,6 +26,9 @@ export function selectSpeechProvider(
     WHISPER_MODEL?: string;
     PIPER_VOICE?: string;
     PIPER_DATA_DIR?: string;
+    TTS_ENGINE?: string;
+    KOKORO_VOICE?: string;
+    KOKORO_DATA_DIR?: string;
     PYTHON?: string;
   },
   script?: { turns: MockTurn[] },
@@ -41,6 +44,9 @@ export function selectSpeechProvider(
         WHISPER_MODEL: env.WHISPER_MODEL ?? "small",
         PIPER_VOICE: env.PIPER_VOICE ?? "en_US-ryan-medium",
         PIPER_DATA_DIR: env.PIPER_DATA_DIR ?? "data/piper",
+        TTS_ENGINE: env.TTS_ENGINE ?? "piper",
+        KOKORO_VOICE: env.KOKORO_VOICE ?? "af_heart",
+        KOKORO_DATA_DIR: env.KOKORO_DATA_DIR ?? "data/kokoro",
       },
     });
     return new LocalSpeechProvider({

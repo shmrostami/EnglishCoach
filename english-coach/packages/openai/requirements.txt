@@ -1,2 +1,4 @@
 faster-whisper
 piper-tts
+# Optional: only for TTS_ENGINE=kokoro (point KOKORO_DATA_DIR at the model files)
+# kokoro-onnx
