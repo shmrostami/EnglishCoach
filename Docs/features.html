@@ -1,0 +1,548 @@
+<title>EnglishCoach Feature Map</title>
+<meta charset="utf-8">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,600&display=swap">
+<style>
+  /* Layout: single reading column with a stat band and edge-to-edge section rules;
+     tables scroll in their own containers. */
+  :root {
+    --bg: #f6f7f8;
+    --surface: #ffffff;
+    --surface-2: #eef1f3;
+    --fg: #15191d;
+    --muted: #5d6874;
+    --line: #dde2e7;
+    --line-strong: #c4ccd4;
+    --accent: #0d6f68;
+    --accent-soft: #e3f0ee;
+    --ok: #1d7449;
+    --ok-soft: #e3f2ea;
+    --warn: #8f5c00;
+    --warn-soft: #f7ecda;
+    --bad: #9c382a;
+    --bad-soft: #f8e6e2;
+    --shadow: 0 1px 2px rgb(21 25 29 / 0.06), 0 8px 24px -16px rgb(21 25 29 / 0.24);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1215;
+      --surface: #161a1e;
+      --surface-2: #1c2126;
+      --fg: #e7ebef;
+      --muted: #98a3af;
+      --line: #272d34;
+      --line-strong: #3a424b;
+      --accent: #57cfc2;
+      --accent-soft: #11251f;
+      --ok: #4fb583;
+      --ok-soft: #13271d;
+      --warn: #dfa64e;
+      --warn-soft: #2a2113;
+      --bad: #ee8472;
+      --bad-soft: #2b1714;
+      --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -16px rgb(0 0 0 / 0.7);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1215;
+    --surface: #161a1e;
+    --surface-2: #1c2126;
+    --fg: #e7ebef;
+    --muted: #98a3af;
+    --line: #272d34;
+    --line-strong: #3a424b;
+    --accent: #57cfc2;
+    --accent-soft: #11251f;
+    --ok: #4fb583;
+    --ok-soft: #13271d;
+    --warn: #dfa64e;
+    --warn-soft: #2a2113;
+    --bad: #ee8472;
+    --bad-soft: #2b1714;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -16px rgb(0 0 0 / 0.7);
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0;
+  }
+  .wrap {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding-block: 48px 72px;
+  }
+
+  h1, h2, h3 {
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-weight: 600;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h1 {
+    font-size: clamp(2rem, 4.4vw, 2.9rem);
+    line-height: 1.1;
+    letter-spacing: -0.015em;
+  }
+  h2 {
+    font-size: 1.45rem;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 1.05rem;
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  p { margin: 0; }
+
+  .lede {
+    margin-top: 14px;
+    font-size: 1.125rem;
+    color: var(--muted);
+    max-width: 64ch;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .rule {
+    height: 1px;
+    background: var(--line);
+    margin: 40px 0 32px;
+  }
+
+  /* stat band */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 32px;
+  }
+  .stat {
+    background: var(--surface);
+    padding: 16px 18px;
+  }
+  .stat b {
+    display: block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 1.6rem;
+    font-weight: 600;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .stat span {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.8rem;
+    color: var(--muted);
+    line-height: 1.35;
+  }
+
+  section { margin-top: 44px; }
+  section > h2 { margin-bottom: 6px; }
+  section > .note {
+    color: var(--muted);
+    font-size: 0.95rem;
+    max-width: 70ch;
+    margin-bottom: 18px;
+  }
+
+  .grid2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 18px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px;
+    min-width: 0;
+  }
+  .card h3 { margin-bottom: 6px; }
+  .card p { font-size: 0.94rem; color: var(--muted); }
+  .card code, td code, li code, .lede code { color: var(--fg); }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86em;
+    background: var(--surface-2);
+    padding: 0.1em 0.36em;
+    border-radius: 4px;
+    overflow-wrap: anywhere;
+  }
+
+  .tablewrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    margin-top: 16px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 560px;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    font-weight: 500;
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { white-space: nowrap; }
+  .path {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.82rem;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  .chip {
+    display: inline-block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .chip.ok { background: var(--ok-soft); color: var(--ok); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.bad { background: var(--bad-soft); color: var(--bad); }
+
+  .modes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 18px;
+  }
+  .mode {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    padding: 14px 16px;
+    min-width: 0;
+  }
+  .mode h3 { font-size: 0.95rem; }
+  .mode .sub {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .mode dl { margin: 0; font-size: 0.86rem; }
+  .mode dt { color: var(--muted); font-size: 0.76rem; margin-top: 8px; }
+  .mode dd { margin: 0; }
+
+  ul.clean {
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+  }
+  ul.clean li {
+    position: relative;
+    padding-left: 20px;
+    font-size: 0.95rem;
+  }
+  ul.clean li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 0.62em;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--line-strong);
+  }
+  ul.clean li.bad::before { background: var(--bad); }
+
+  .defects li { color: var(--fg); }
+  .defects li span.what { color: var(--muted); }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.84rem;
+    max-width: 70ch;
+  }
+
+  @media (max-width: 480px) {
+    .wrap { padding-block: 32px 56px; }
+    .stat { padding: 13px 14px; }
+    .stat b { font-size: 1.35rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">Code inventory · 2026-10-19</p>
+  <h1>EnglishCoach Feature Map</h1>
+  <p class="lede">What the app actually does, where each piece lives, and which parts of the design document never made it into code. Built by reading the source, not the docs.</p>
+
+  <div class="stats">
+    <div class="stat"><b>3</b><span>web views</span></div>
+    <div class="stat"><b>13</b><span>HTTP + WS routes</span></div>
+    <div class="stat"><b>10</b><span>session states</span></div>
+    <div class="stat"><b>20</b><span>skill codes</span></div>
+    <div class="stat"><b>3</b><span>provider modes</span></div>
+    <div class="stat"><b>184</b><span>tests, 31 files</span></div>
+  </div>
+
+  <section>
+    <h2>What runs</h2>
+    <p class="note">pnpm monorepo on Node 20–22. No auth, no multi-user: everything is hardcoded to <code>learner-1</code>. The API seeds one learner and three goals on every start.</p>
+    <div class="grid2">
+      <div class="card">
+        <h3>API</h3>
+        <p>Fastify 5 on <code>127.0.0.1:3100</code>. Opens SQLite, migrates, seeds, then runs a job poller every second. <span class="path">apps/api/src/server.ts</span></p>
+      </div>
+      <div class="card">
+        <h3>Web</h3>
+        <p>Vite + React SPA on <code>127.0.0.1:5173</code>. Proxies <code>/v1</code> and <code>/ws</code> to the API so the browser stays same-origin. <span class="path">apps/web/vite.config.ts</span></p>
+      </div>
+      <div class="card">
+        <h3>Provider default</h3>
+        <p>Code default is <code>mock</code>; the local <code>apps/api/.env</code> currently runs <code>PROVIDER=local</code> with <code>TTS_ENGINE=kokoro</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <section>
+    <h2>The live conversation loop</h2>
+    <p class="note">Mic audio goes up as 16 kHz PCM16 over a WebSocket; coach audio comes back paced in ~20 ms frames and resampled in the browser to the device rate.</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Feature</th><th>Does</th><th>Where</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Voice session</td><td>Mic capture, live transcript bubbles deduped by sequence, state chip, connection chip, on-air timer, Mute/Unmute, End button.</td><td class="path">apps/web/src/views/SessionView.tsx</td></tr>
+          <tr><td>State machine</td><td>Ten states, transitions enforced in one table.</td><td class="path">apps/api/src/stateMachine.ts</td></tr>
+          <tr><td>WS protocol</td><td>In: audio, control start/end/mute/unmute. Out: audio, transcript, state, intervention, session_ended.</td><td class="path">apps/api/src/realtime/bridge.ts</td></tr>
+          <tr><td>Reconnect</td><td>Bounded exponential backoff (5 attempts, 500 ms → 8 s). The server keeps the bridge and the provider alive across a drop, so a re-attach resumes the same conversation.</td><td class="path">apps/web/src/audio/wsClient.ts</td></tr>
+          <tr><td>Warmup</td><td>120 s timer, or ends early on the first learner turn.</td><td class="path">bridge.ts</td></tr>
+          <tr><td>Timed challenge</td><td>At 900 s the coach issues a discourse intervention.</td><td class="path">bridge.ts</td></tr>
+          <tr><td>Live micro-coaching</td><td>Provider tool calls move the session into micro-coach or target-retry.</td><td class="path">bridge.ts</td></tr>
+          <tr><td>Audio playback</td><td>Worklet ring buffer ~170 ms; streaming windowed-sinc resample from any source rate.</td><td class="path">apps/web/src/audio/</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">Micro-coaching is <strong>openai mode only</strong>. The local provider emits no tool calls, so only the timed challenge fires.</p>
+  </section>
+
+  <section>
+    <h2>Screens</h2>
+    <p class="note">Three routes, each under its own error boundary. No settings, no history browser, no profile screen, no error-pattern view — the transcript exists only while a session is live.</p>
+    <div class="grid2">
+      <div class="card">
+        <h3><code>/</code> Session</h3>
+        <p>Speak, see your words and the coach's, hear the reply, end the session.</p>
+      </div>
+      <div class="card">
+        <h3><code>/dashboard</code></h3>
+        <p>CEFR ladder, estimated level with confidence, next-session plan (or an empty-plan card), skill mastery by family, last ten sessions with per-dimension scores.</p>
+      </div>
+      <div class="card">
+        <h3><code>/goals</code></h3>
+        <p>List goals, add one with a type and description, mark it complete.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <section>
+    <h2>HTTP and WebSocket surface</h2>
+    <p class="note">Every route lives in <span class="path">apps/api/src/routes/</span>. The learner ID is always <code>learner-1</code>; anything else returns 404.</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Route</th><th>Does</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>POST /v1/learners/:id/sessions</code></td><td>Starts a session from the active plan — topic, planned difficulty.</td></tr>
+          <tr><td><code>GET /v1/sessions/:id</code></td><td>Session plus transcript plus the persisted scores, analysis and metrics. An unassessed dimension is <code>null</code>, not zero.</td></tr>
+          <tr><td><code>POST /v1/sessions/:id/end</code></td><td>Ends once, computes metrics, enqueues analysis, tears down the live bridge and releases the cached provider.</td></tr>
+          <tr><td><code>POST /v1/sessions/:id/analyze</code></td><td>Re-queues a failed analysis; 409 for an already-analyzed session.</td></tr>
+          <tr><td><code>GET /v1/jobs/failed</code></td><td>Failed jobs with their attempt history and error class.</td></tr>
+          <tr><td><code>GET /v1/learners/:id</code></td><td>Profile: languages, target and estimated level, correction style.</td></tr>
+          <tr><td><code>GET …/skills</code></td><td>Raw skill rows with mastery, confidence, trend.</td></tr>
+          <tr><td><code>GET …/learning-plan</code></td><td>Newest active plan. No plan is a valid empty state: <code>200</code> with a JSON <code>null</code> body.</td></tr>
+          <tr><td><code>GET …/progress</code></td><td>Last ten completed sessions, oldest first, with per-dimension scores.</td></tr>
+          <tr><td><code>GET …/goals</code></td><td>Goal rows.</td></tr>
+          <tr><td><code>POST …/goals</code></td><td>Creates a goal; priority fixed at 0.5.</td></tr>
+          <tr><td><code>PATCH …/goals/:goalId</code></td><td>Priority, description, status. The web client only sends status.</td></tr>
+          <tr><td><code>WS /ws/session/:id</code></td><td>Attaches to the live session; re-attaches if a bridge already exists.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>After the session ends</h2>
+    <p class="note">Two background jobs, invisible in the UI. The learning engine — not the model — decides what to work on next.</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Job</th><th>Produces</th><th>Where</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>analyze</code></td><td>Six dimension scores, observations, skill mastery updates, error patterns, vocabulary, level estimate. Session becomes completed. Pronunciation stays <code>null</code> unless the provider declares audio-grounded evidence.</td><td class="path">apps/api/src/workers/analysis.ts</td></tr>
+          <tr><td><code>plan_next</code></td><td>Adjusted difficulty, primary and secondary targets, topic. The LLM picks the topic; the engine picks the targets.</td><td class="path">apps/api/src/workers/planner.ts</td></tr>
+          <tr><td>metrics</td><td>Words per minute, pauses over 800 ms, speaking seconds.</td><td class="path">apps/api/src/metrics.ts</td></tr>
+          <tr><td>runner</td><td>One-second poll, three attempts, exponential backoff, idempotent enqueue. Every attempt is recorded with an error class; a job that gives up moves its session to failed.</td><td class="path">apps/api/src/workers/jobs.ts</td></tr>
+          <tr><td>logs</td><td>JSON-line structured logging with correlation ids — attach, re-attach, reject, job failure.</td><td class="path">apps/api/src/logger.ts</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Learning engine</h2>
+    <p class="note">Pure functions, no I/O, fully unit-tested — <span class="path">packages/learning-engine/src/</span>.</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Module</th><th>Computes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>scoring</code></td><td>Weighted overall score across fluency, grammar, vocabulary, pronunciation, coherence, interaction — over the assessed dimensions only; a not-assessed dimension is excluded and the rest renormalize.</td></tr>
+          <tr><td><code>mastery</code></td><td>Exponential moving average per skill (α 0.25 → 0.15) with confidence and trend.</td></tr>
+          <tr><td><code>errors</code></td><td>Recurrence counting, 30-day half-life decay, retirement at mastery 0.8.</td></tr>
+          <tr><td><code>difficulty</code></td><td>±0.02 to ±0.05 steps clamped between 0.15 and 0.95.</td></tr>
+          <tr><td><code>prioritization</code></td><td>Six-term priority: recurrence, severity, goal relevance, communicative impact, readiness, forgetting risk.</td></tr>
+          <tr><td><code>planning</code></td><td>Target selection, intervention choice, CEFR banding.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">Twenty skill codes across five families — grammar, vocabulary, fluency, pronunciation, discourse. <span class="path">packages/domain/src/codes.ts</span></p>
+  </section>
+
+  <div class="rule"></div>
+
+  <section>
+    <h2>Three provider modes</h2>
+    <p class="note">Selected by <code>PROVIDER</code>. Mock is the default and needs no key; local needs no key either, but analysis stays fake.</p>
+    <div class="modes">
+      <div class="mode">
+        <h3>mock</h3>
+        <div class="sub">default · no key</div>
+        <dl>
+          <dt>Learner audio</dt><dd>Ignored — scripted lines</dd>
+          <dt>Coach voice</dt><dd>Silent frames</dd>
+          <dt>Tool calls</dt><dd>Scripted</dd>
+          <dt>Analysis</dt><dd>Mock lexicon</dd>
+        </dl>
+      </div>
+      <div class="mode">
+        <h3>openai</h3>
+        <div class="sub">needs API key</div>
+        <dl>
+          <dt>Learner audio</dt><dd>Realtime API</dd>
+          <dt>Coach voice</dt><dd>Realtime, 24 kHz</dd>
+          <dt>Tool calls</dt><dd>Yes</dd>
+          <dt>Analysis</dt><dd>Real LLM</dd>
+        </dl>
+      </div>
+      <div class="mode">
+        <h3>local</h3>
+        <div class="sub">no key · currently active</div>
+        <dl>
+          <dt>Learner audio</dt><dd>faster-whisper</dd>
+          <dt>Coach voice</dt><dd>Piper 22.05k / Kokoro 24k</dd>
+          <dt>Tool calls</dt><dd>None</dd>
+          <dt>Analysis</dt><dd>Mock lexicon</dd>
+        </dl>
+      </div>
+    </div>
+    <p class="note" style="margin-top:14px">Local mode talks, but every post-session number it produces is still the mock lexicon's. The README says so; it is easy to miss in the UI.</p>
+  </section>
+
+  <section>
+    <h2>Designed, not built</h2>
+    <p class="note">Features described in <span class="path">Docs/design.md</span> that have no working implementation. Read this before promising any of them.</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Status</th><th>Feature</th><th>Reality</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="chip bad">absent</span></td><td>Pronunciation scoring</td><td>Nothing is measured. The score is <code>null</code> ("not assessed") unless an analysis provider declares audio-grounded evidence, and the analysis prompt now requires <code>"pronunciation": null</code>. A score field and three skill codes exist and nothing produces them.</td></tr>
+          <tr><td><span class="chip bad">absent</span></td><td>Session types</td><td>No role-play, debate, storytelling or simulation rotation. One free conversation with a timed challenge.</td></tr>
+          <tr><td><span class="chip bad">absent</span></td><td>Spaced vocabulary review</td><td>A <code>nextReviewAt</code> column exists; nothing writes or reads it for scheduling.</td></tr>
+          <tr><td><span class="chip bad">absent</span></td><td>Goal decomposition</td><td>Goals are flat text rows.</td></tr>
+          <tr><td><span class="chip bad">unused</span></td><td>Memory-update prompt</td><td><code>prompts/memory/v1.txt</code> is registered but has zero call sites. Memory writes are deterministic code instead.</td></tr>
+          <tr><td><span class="chip bad">absent</span></td><td>Recurring-errors view</td><td>The table is written; no read endpoint and no UI.</td></tr>
+          <tr><td><span class="chip warn">partial</span></td><td>Vocabulary memory</td><td>Schema is complete. The worker guesses the word with a regex and only ever updates production mastery; recognition, collocation and exposure stay at their initial values.</td></tr>
+          <tr><td><span class="chip warn">partial</span></td><td>Conversation difficulty</td><td>One scalar 0–1. The design's six-part decomposition is absent.</td></tr>
+          <tr><td><span class="chip warn">partial</span></td><td>Progress evaluation</td><td>Level banding and last-ten deltas exist. No plateau detection, no level history, no per-dimension trends in the UI.</td></tr>
+          <tr><td><span class="chip ok">built</span></td><td>Learning engine math</td><td>Scoring, mastery, errors, difficulty, priority, target selection and intervention choice all exist as tested pure functions.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Defects worth knowing</h2>
+    <ul class="clean defects">
+      <li><span class="chip warn">gap</span> &nbsp;In openai mode every turn has zero duration, so words per minute reads zero.</li>
+      <li><span class="chip warn">gap</span> &nbsp;The retry and job-inspection routes exist but nothing in the web client calls them yet — recovery is an API-only path.</li>
+      <li><span class="chip warn">gap</span> &nbsp;The client retries a reconnect even when the server has already rejected the session (4000/4001), so a dead session burns the whole attempt budget before the UI gives up.</li>
+      <li><span class="chip warn">gap</span> &nbsp;The start control the client sends is ignored server-side.</li>
+    </ul>
+  </section>
+
+  <footer>
+    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization slice. Paths are relative to the repository root. Test count reflects a green run of the full suite.
+  </footer>
+
+</div>

@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { eq, and } from "drizzle-orm";
 import {
   sessions, utterances, observations, skills, errorPatterns, vocabularyItems,
-  learners, jobs, parseJson, type DrizzleDb,
+  learners, jobs, tryParseJson, type DrizzleDb,
 } from "@ec/db";
-import type { SessionAnalysis, SessionMetrics, Observation, SkillState } from "@ec/domain";
+import type { Scores, SessionAnalysis, SessionMetrics, Observation, SkillState } from "@ec/domain";
 import { SessionAnalysisSchema } from "@ec/domain";
 import type { AnalysisProvider, TranscriptTurn } from "@ec/openai";
 import {
@@ -43,9 +43,9 @@ export async function runAnalysis(opts: {
     }))
     .sort((a, b) => a.startedAt - b.startedAt);
 
-  const metrics: SessionMetrics = parseJson<SessionMetrics>(session.metrics) ?? {
+  const metrics: SessionMetrics = tryParseJson<SessionMetrics>(session.metrics) ?? {
     speakingSeconds: 0, userWordCount: 0, wordsPerMinute: 0, pauseCount: 0,
-    avgPauseMs: 0, longestPauseMs: 0, utteranceCount: 0, avgUtteranceWords: 0, rmsEnergyAvg: 0,
+    avgPauseMs: 0, longestPauseMs: 0, utteranceCount: 0, avgUtteranceWords: 0,
   };
   const learnerContext = buildLearnerContext(d, session.learnerId, sessionId, now);
 
@@ -59,13 +59,21 @@ export async function runAnalysis(opts: {
   const analysis = SessionAnalysisSchema.parse(raw); // throws → job retry/failure, no writes
 
   // 1) session scores + overall
-  const scores = analysis.scores;
+  // A provider that cannot ground a score in audio must not contribute one:
+  // the number is stripped here, not merely discouraged in the prompt
+  // (spec §12.1 / §3 principle 7 — no fabricated measurement).
+  const scores: Scores = provider.capabilities.pronunciationEvidence
+    ? analysis.scores
+    : { ...analysis.scores, pronunciation: null };
   const overall = calculateOverall(scores);
+  // The stored analysis carries the same stripped scores as the columns, so a
+  // reader never sees a pronunciation number the score column denies.
+  const stored = { ...analysis, scores };
 
   // 2) update learner memory (sequential statements; safe to re-run: the
   // idempotency guard at the top plus UNIQUE constraints make a crashed
   // mid-run retry a no-op)
-  applyMemory(d, session.learnerId, sessionId, analysis, overall, now);
+  applyMemory(d, session.learnerId, sessionId, stored, overall, now);
 
   d.update(sessions).set({
     status: "COMPLETED",
@@ -76,7 +84,7 @@ export async function runAnalysis(opts: {
     coherenceScore: scores.coherence,
     interactionScore: scores.interaction,
     overallScore: overall,
-    analysis: JSON.stringify(analysis),
+    analysis: JSON.stringify(stored),
   }).where(eq(sessions.id, sessionId)).run();
 
   // learner level estimate (longitudinal, spec §31)

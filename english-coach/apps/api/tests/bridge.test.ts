@@ -36,6 +36,25 @@ function fakeClient() {
 }
 
 /**
+ * Wait for a condition instead of a fixed number of milliseconds. The mock
+ * provider plays its script on timers, so under load a hardcoded 400 ms could
+ * land before the script had finished — which looked like a state-machine bug.
+ */
+async function waitFor(predicate: () => boolean, what: string, timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) return;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+/** How many coach turns the client has received so far. */
+function coachTurns(client: { sent: ServerMessage[] }): number {
+  return client.sent.filter((m) => m.t === "transcript" && m.speaker === "coach").length;
+}
+
+/**
  * Provider seam that counts connect() calls and never closes on its own, so
  * re-attach behavior is observable (the MockSpeechProvider re-plays its script
  * on every connect, which masks a double-connect).
@@ -59,11 +78,13 @@ function countingProvider() {
 describe("RealtimeBridge", () => {
   let service: SessionService;
   let sessionId: string;
+  let sqlite: Database.Database;
 
   beforeEach(() => {
     const s = setup();
     service = s.service;
     sessionId = s.session.id;
+    sqlite = s.sqlite;
   });
 
   it("starts in WARMUP, moves to CONVERSATION on first learner utterance", async () => {
@@ -78,7 +99,13 @@ describe("RealtimeBridge", () => {
     });
     expect(bridge.attach(client as never)).toBe(true);
     expect(bridge.state).toBe("WARMUP");
-    await new Promise((r) => setTimeout(r, 400));
+    // The script ends on a coach turn, and the state is CONVERSATION again by
+    // then (it passes through TARGET_RETRY in the middle). Waiting for the
+    // whole script is what makes the final state deterministic.
+    await waitFor(
+      () => bridge.state === "CONVERSATION" && coachTurns(client) === 3,
+      "the script to finish in CONVERSATION",
+    );
     expect(bridge.state).toBe("CONVERSATION");
     const learnerMsgs = client.sent.filter((m) => m.t === "transcript" && m.speaker === "learner");
     expect(learnerMsgs).toHaveLength(2);
@@ -94,10 +121,33 @@ describe("RealtimeBridge", () => {
       difficulty: 0.5, warmupMs: 10, sessionTargetMs: 999_999, onEnded: () => {},
     });
     bridge.attach(client as never);
-    await new Promise((r) => setTimeout(r, 500));
+    await waitFor(
+      () => client.sent.some((m) => m.t === "intervention" && m.kind === "target_retry") && bridge.state === "CONVERSATION",
+      "the intervention and the return to CONVERSATION",
+    );
     expect(client.sent.some((m) => m.t === "intervention" && m.kind === "target_retry" && m.skill === "grammar.past_tense")).toBe(true);
     // state passed through TARGET_RETRY and back to CONVERSATION
     expect(bridge.state).toBe("CONVERSATION");
+    bridge.destroy("test");
+  });
+
+  it("writes a live intervention to `interventions`, not to `observations` (spec §23)", async () => {
+    const client = fakeClient();
+    const provider = new MockSpeechProvider({ turns: SESSION_SCRIPT, autoClose: false });
+    const bridge = new RealtimeBridge({
+      sessionId, provider, service,
+      learnerContext: service.getLearnerContext(sessionId),
+      difficulty: 0.5, warmupMs: 10, sessionTargetMs: 999_999, onEnded: () => {},
+    });
+    bridge.attach(client as never);
+    await waitFor(
+      () => client.sent.some((m) => m.t === "intervention") && coachTurns(client) === 3,
+      "the intervention and the end of the script",
+    );
+    const interventions = sqlite.prepare("SELECT kind, skill_code FROM interventions WHERE session_id = ?").all(sessionId);
+    expect(interventions).toEqual([{ kind: "target_retry", skill_code: "grammar.past_tense" }]);
+    const obs = sqlite.prepare("SELECT COUNT(*) AS n FROM observations WHERE session_id = ?").get(sessionId) as { n: number };
+    expect(obs.n).toBe(0);
     bridge.destroy("test");
   });
 
@@ -191,7 +241,7 @@ describe("RealtimeBridge", () => {
       onEnded: () => { endedState = "ANALYZING"; },
     });
     bridge.attach(client as never);
-    await new Promise((r) => setTimeout(r, 300)); // script runs out -> provider closed
+    await waitFor(() => bridge.state === "FAILED", "the provider drop"); // script runs out -> provider closed
     expect(bridge.state).toBe("FAILED");
     expect(client.sent.some((m) => m.t === "session_ended" && m.state === "FAILED")).toBe(true);
     expect(endedState).toBeNull(); // no analysis job for a FAILED session

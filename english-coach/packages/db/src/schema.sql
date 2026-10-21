@@ -140,3 +140,28 @@ CREATE TABLE jobs (
   done_at INTEGER,
   UNIQUE (session_id, type)
 );
+
+-- Live coaching interventions. Deliberately NOT in `observations`: that table
+-- holds assessment observations (language_error/strength/...), while these rows
+-- record what the coach did during the conversation (spec §23 separation).
+CREATE TABLE interventions (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  kind TEXT NOT NULL,
+  skill_code TEXT,
+  state TEXT,
+  created_at INTEGER NOT NULL
+);
+
+-- One row per job attempt. `jobs` keeps only the latest error, so without this
+-- table a failed job has no history and no error class (spec §10.3).
+CREATE TABLE job_attempts (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL REFERENCES jobs(id),
+  attempt INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  error_class TEXT,
+  error TEXT,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER
+);

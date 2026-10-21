@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq, and } from "drizzle-orm";
 import {
   openDb, db, migrate, ensureSeed, sessions, skills, errorPatterns,
-  learningPlans, jobs, learners,
+  learningPlans, jobs, jobAttempts, learners,
 } from "@ec/db";
 import type { DrizzleDb } from "@ec/db";
 import { LEARNER_ID } from "@ec/domain";
@@ -19,7 +19,7 @@ const NOW = 1_700_000_000_000;
 function seedAnalyzableSession(d: DrizzleDb, service: SessionService, sessionId: string): void {
   d.update(sessions).set({ status: "ANALYZING", metrics: JSON.stringify({
     speakingSeconds: 12, userWordCount: 20, wordsPerMinute: 100, pauseCount: 1,
-    avgPauseMs: 300, longestPauseMs: 900, utteranceCount: 4, avgUtteranceWords: 5, rmsEnergyAvg: 0.2,
+    avgPauseMs: 300, longestPauseMs: 900, utteranceCount: 4, avgUtteranceWords: 5,
   }) }).where(eq(sessions.id, sessionId)).run();
   const turns: { speaker: "learner" | "coach"; text: string; startedAt: number; endedAt: number }[] = [
     { speaker: "coach", text: "Hi, tell me about yesterday.", startedAt: NOW, endedAt: NOW + 2000 },
@@ -81,6 +81,59 @@ describe("JobRunner", () => {
     expect(defaultBackoffMs(2)).toBe(20000);
     expect(defaultBackoffMs(5)).toBe(30000);
   });
+
+  it("records every attempt with an error class and reports the terminal failure", async () => {
+    const f = makeFixture();
+    const failed: { jobId: string; class: string; message: string }[] = [];
+    const runner = new JobRunner({
+      db: f.d, pollMs: 1,
+      handle: async () => { throw new Error("upstream rejected"); },
+      onFailed: (job, error) => { failed.push({ jobId: job.id, class: error.class, message: error.message }); },
+    });
+    runner.enqueue("analyze", f.sessionId);
+    const jobId = f.d.select().from(jobs).where(eq(jobs.sessionId, f.sessionId)).all()[0].id;
+    for (let i = 0; i < 3; i++) await runner.processOne(jobId);
+
+    expect(failed).toHaveLength(1);
+    expect(failed[0].class).toBe("provider");
+    const attempts = f.d.select().from(jobAttempts).where(eq(jobAttempts.jobId, jobId)).all();
+    expect(attempts).toHaveLength(3);
+    expect(attempts.map((a) => a.attempt)).toEqual([1, 2, 3]);
+    expect(attempts.every((a) => a.status === "failed" && a.errorClass === "provider")).toBe(true);
+  });
+
+  it("a terminal analysis failure moves the session out of ANALYZING (spec §5)", async () => {
+    const f = makeFixture();
+    const runner = new JobRunner({
+      db: f.d, pollMs: 1,
+      handle: async () => { throw new Error("upstream rejected"); },
+      onFailed: (job) => { if (job.type === "analyze" && job.sessionId) f.service.failSession(job.sessionId, NOW + 200000); },
+    });
+    runner.enqueue("analyze", f.sessionId);
+    const jobId = f.d.select().from(jobs).where(eq(jobs.sessionId, f.sessionId)).all()[0].id;
+    for (let i = 0; i < 3; i++) await runner.processOne(jobId);
+
+    const job = f.d.select().from(jobs).where(eq(jobs.id, jobId)).all()[0];
+    expect(job.status).toBe("failed");
+    // The session is not stuck in ANALYZING any more.
+    expect(f.d.select().from(sessions).where(eq(sessions.id, f.sessionId)).all()[0].status).toBe("FAILED");
+  });
+
+  it("reset re-queues an existing job instead of inserting a duplicate", () => {
+    const f = makeFixture();
+    const runner = new JobRunner({ db: f.d, handle: async () => {} });
+    runner.enqueue("analyze", f.sessionId);
+    const jobId = f.d.select().from(jobs).where(eq(jobs.sessionId, f.sessionId)).all()[0].id;
+    f.d.update(jobs).set({ status: "failed", attempts: 3, error: "boom" }).where(eq(jobs.id, jobId)).run();
+
+    expect(runner.reset("analyze", f.sessionId)).toBe(true);
+    const job = f.d.select().from(jobs).where(eq(jobs.id, jobId)).all()[0];
+    expect(job.status).toBe("pending");
+    expect(job.attempts).toBe(0);
+    expect(job.error).toBeNull();
+    expect(f.d.select().from(jobs).where(eq(jobs.sessionId, f.sessionId)).all()).toHaveLength(1);
+    expect(runner.reset("analyze", "sess-nope")).toBe(false);
+  });
 });
 
 describe("runAnalysis (mock provider)", () => {
@@ -132,6 +185,7 @@ describe("runAnalysis (mock provider)", () => {
 
   it("invalid provider output fails the job without touching learner state (Review Focus 1)", async () => {
     const bad: AnalysisProvider = {
+      capabilities: { pronunciationEvidence: false },
       analyze: async () => { throw new Error("upstream rejected: expected object, got string"); },
       plan: async () => { throw new Error("unused"); },
     };
@@ -140,6 +194,54 @@ describe("runAnalysis (mock provider)", () => {
       .rejects.toThrow(/upstream rejected/);
     expect(d.select().from(skills).all()).toEqual(before);
     expect(d.select().from(sessions).where(eq(sessions.id, sessionId)).all()[0].status).toBe("ANALYZING");
+  });
+
+  it("stores pronunciation as null when the provider has no audio evidence (spec §12.1)", async () => {
+    await runAnalysis({ db: d, provider: new MockAnalysisProvider(), sessionId, now: NOW + 120000 });
+    const session = d.select().from(sessions).where(eq(sessions.id, sessionId)).all()[0];
+    expect(session.pronunciationScore).toBeNull();
+    const stored = JSON.parse(session.analysis!) as import("@ec/domain").SessionAnalysis;
+    expect(stored.scores.pronunciation).toBeNull();
+  });
+
+  it("keeps a pronunciation score only when the provider declares audio evidence", async () => {
+    const grounded: AnalysisProvider = {
+      capabilities: { pronunciationEvidence: true },
+      analyze: async () => ({
+        scores: {
+          fluency: 0.7, grammar: 0.6, vocabulary: 0.8, pronunciation: 0.65,
+          coherence: 0.7, interaction: 0.8,
+        },
+        observations: [],
+        recurring_errors: [], strengths: [], recommended_targets: [],
+      }),
+      plan: async () => { throw new Error("unused"); },
+    };
+    await runAnalysis({ db: d, provider: grounded, sessionId, now: NOW + 120000 });
+    const session = d.select().from(sessions).where(eq(sessions.id, sessionId)).all()[0];
+    expect(session.pronunciationScore).toBe(0.65);
+  });
+
+  it("strips a pronunciation number from a provider that cannot ground it", async () => {
+    // The provider LLM returned a number; without audio evidence the worker
+    // strips it (spec §3 principle 7: no fabricated measurement).
+    const ungrounded: AnalysisProvider = {
+      capabilities: { pronunciationEvidence: false },
+      analyze: async () => ({
+        scores: {
+          fluency: 0.7, grammar: 0.6, vocabulary: 0.8, pronunciation: 0.78,
+          coherence: 0.7, interaction: 0.8,
+        },
+        observations: [],
+        recurring_errors: [], strengths: [], recommended_targets: [],
+      }),
+      plan: async () => { throw new Error("unused"); },
+    };
+    await runAnalysis({ db: d, provider: ungrounded, sessionId, now: NOW + 120000 });
+    const session = d.select().from(sessions).where(eq(sessions.id, sessionId)).all()[0];
+    expect(session.pronunciationScore).toBeNull();
+    const stored = JSON.parse(session.analysis!) as import("@ec/domain").SessionAnalysis;
+    expect(stored.scores.pronunciation).toBeNull();
   });
 });
 
@@ -189,5 +291,36 @@ describe("runPlanner", () => {
       expect(unknown.severity).toBe(0.4);
     }
     expect(candidates.some((c) => c.skill === "grammar.past_tense")).toBe(true);
+  });
+
+  it("adapts difficulty to the NEWEST five completed sessions, not the oldest", async () => {
+    // Seven completed sessions: the two oldest are far below the newest five,
+    // so a planner that reads the oldest five drops the difficulty while a
+    // planner that reads the newest five raises it.
+    const f = makeFixture();
+    const dd = f.d;
+    const svc = f.service;
+    // Oldest two: very low scores.
+    for (let i = 0; i < 2; i++) {
+      const s = svc.createSession(LEARNER_ID, NOW - (10 - i) * 86_400_000);
+      dd.update(sessions).set({ status: "COMPLETED", startedAt: NOW - (10 - i) * 86_400_000, overallScore: 0.1 }).where(eq(sessions.id, s.id)).run();
+    }
+    // Newest five: high scores.
+    for (let i = 0; i < 5; i++) {
+      const s = svc.createSession(LEARNER_ID, NOW - (5 - i) * 86_400_000);
+      dd.update(sessions).set({ status: "COMPLETED", startedAt: NOW - (5 - i) * 86_400_000, overallScore: 0.9 }).where(eq(sessions.id, s.id)).run();
+    }
+    // The session under test: planned difficulty 0.5.
+    const target = svc.createSession(LEARNER_ID, NOW);
+    dd.update(sessions).set({ status: "ANALYZING", analysis: JSON.stringify({
+      scores: { fluency: 0.7, grammar: 0.6, vocabulary: 0.8, pronunciation: null, coherence: 0.7, interaction: 0.8 },
+      observations: [], recurring_errors: [], strengths: [], recommended_targets: [],
+    }) }).where(eq(sessions.id, target.id)).run();
+
+    await runPlanner({ db: dd, provider: new MockAnalysisProvider(), sessionId: target.id, now: NOW + 121000 });
+    const plan = dd.select().from(learningPlans)
+      .where(and(eq(learningPlans.learnerId, LEARNER_ID), eq(learningPlans.status, "active"))).all()[0];
+    // recentPerformance over the newest five = 0.9 → difficulty goes UP.
+    expect(plan.difficulty).toBeGreaterThan(0.5);
   });
 });

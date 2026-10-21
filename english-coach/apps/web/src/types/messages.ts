@@ -8,3 +8,12 @@ export type ServerMessage =
   | { t: "state"; state: string }
   | { t: "intervention"; kind: "micro_coach" | "target_retry" | "challenge"; skill: string }
   | { t: "session_ended"; state: string; reason?: string };
+
+/**
+ * The client-side connection state. The server does not send it: the client
+ * derives it from the socket's own lifecycle, so a dropped connection is
+ * visible instead of silent (spec §5).
+ */
+export type ConnectionState = "connecting" | "open" | "reconnecting" | "closed";
+
+export type ControlAction = "start" | "end" | "mute" | "unmute";

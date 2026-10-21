@@ -4,6 +4,7 @@ import { createCapture, type Capture } from "../audio/capture.js";
 import { createPlayer, type Player } from "../audio/player.js";
 import { SessionSocket } from "../audio/wsClient.js";
 import { initialTranscript, applyTranscript, type TranscriptState } from "../state/transcript.js";
+import type { ConnectionState } from "../types/messages.js";
 
 // The live state chip: server states read as plain words; "ended:<reason>"
 // is the quiet local close the client sees before the server's session_ended.
@@ -12,6 +13,13 @@ function stateLabel(state: string): string {
   if (state.startsWith("ended:")) return "Ended";
   return state;
 }
+
+const CONNECTION_LABEL: Record<ConnectionState, string> = {
+  connecting: "Connecting",
+  open: "Connected",
+  reconnecting: "Reconnecting…",
+  closed: "Disconnected",
+};
 
 function formatClock(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60);
@@ -24,6 +32,8 @@ const WAVE_BARS = 11;
 export function SessionView() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [state, setState] = useState("idle");
+  const [connection, setConnection] = useState<ConnectionState>("closed");
+  const [muted, setMuted] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscript());
   const [note, setNote] = useState("");
   const [seconds, setSeconds] = useState(0);
@@ -53,12 +63,13 @@ export function SessionView() {
     ended.current = false;
     setNote("");
     setSeconds(0);
+    setMuted(false);
     startTs.current = Date.now();
     setTranscript(initialTranscript()); // a fresh session starts with a clean transcript
     const created = await api.createSession();
     setSessionId(created.sessionId);
     setState("STARTING");
-    const ws = new WebSocket(`${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/session/${created.sessionId}`);
+    const url = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/session/${created.sessionId}`;
     // A socket's onclose fires asynchronously, so a previous session's close
     // event can land after the NEXT session has started. Every handler must
     // check the socket is still the current one before touching shared state,
@@ -78,24 +89,29 @@ export function SessionView() {
       // Queue control sent before the socket is OPEN (flushed in onopen), so
       // an early End click can't throw InvalidStateError on a closed socket.
       sendControl: (a: "start" | "end" | "mute" | "unmute") => {
-        if (ws.readyState === WebSocket.OPEN) socket.sendControl(a);
+        if (socketRef.current === stopper) socket.sendControl(a);
         else pending.push(a);
       },
       quiet: () => { capture?.stop(); player?.stop(); }, // silence now, keep the socket
       // Full local teardown: idempotent (audio stops are already no-ops once
       // stopped), and the stale-guard so a dead session can't tear down a
       // newer one.
-      teardown: () => { if (socketRef.current === stopper) socketRef.current = null; capture?.stop(); player?.stop(); ws.close(); },
+      teardown: () => { if (socketRef.current === stopper) socketRef.current = null; capture?.stop(); player?.stop(); socket.close(); },
     };
-    const socket = new SessionSocket(ws as never, (m) => {
-      if (!live()) return;
-      if (m.t === "audio") player?.playBase64(m.data, m.sampleRate);
-      else if (m.t === "transcript") setTranscript((s) => applyTranscript(s, m));
-      else if (m.t === "state") setState(m.state);
-      else if (m.t === "intervention") setNote(`${m.kind === "micro_coach" ? "micro-correction" : m.kind} — ${m.skill}`);
-      else if (m.t === "session_ended") { ended.current = true; setState(m.state); if (m.reason) setNote(`Session ended: ${m.reason}`); setSessionId(null); stopper.teardown(); }
-    }, (reason) => { if (!live()) return; if (!ended.current) setState(`ended:${reason}`); setSessionId(null); stopper.teardown(); });
-    ws.onopen = () => { for (const a of pending.splice(0)) socket.sendControl(a); };
+    const socket = new SessionSocket({
+      connect: () => new WebSocket(url) as never,
+      onOpen: () => { for (const a of pending.splice(0)) socket.sendControl(a); },
+      onConnection: (c) => { if (live()) setConnection(c); },
+      onMessage: (m) => {
+        if (!live()) return;
+        if (m.t === "audio") player?.playBase64(m.data, m.sampleRate);
+        else if (m.t === "transcript") setTranscript((s) => applyTranscript(s, m));
+        else if (m.t === "state") setState(m.state);
+        else if (m.t === "intervention") setNote(`${m.kind === "micro_coach" ? "micro-correction" : m.kind} — ${m.skill}`);
+        else if (m.t === "session_ended") { ended.current = true; setState(m.state); if (m.reason) setNote(`Session ended: ${m.reason}`); setSessionId(null); stopper.teardown(); }
+      },
+      onClose: (reason) => { if (!live()) return; if (!ended.current) setState(`ended:${reason}`); setSessionId(null); setNote(`Connection lost: ${reason}`); stopper.teardown(); },
+    });
     socketRef.current = stopper;
     // Audio setup comes after: it may block on the mic-permission prompt for
     // seconds, and the transcript must already be captured by then. If the
@@ -134,6 +150,16 @@ export function SessionView() {
     stopper.quiet(); // silence the mic + playback now; the server closes the socket
   }
 
+  // Mute silences the learner: the coach's audio stops and the mic is not fed
+  // upstream. The server honours `control:mute` on the same channel.
+  function toggleMute() {
+    const stopper = socketRef.current;
+    if (!stopper) return;
+    const next = !muted;
+    setMuted(next);
+    stopper.sendControl(next ? "mute" : "unmute");
+  }
+
   return (
     <section className="ec-session">
       <h1 className="ec-h1">Let's talk</h1>
@@ -145,6 +171,7 @@ export function SessionView() {
             <span className="ec-live__dot" aria-hidden="true" />
             <span className="ec-live__state">{stateLabel(state)}</span>
           </span>
+          <span className={"ec-conn ec-conn--" + connection} role="status">{CONNECTION_LABEL[connection]}</span>
           {isLive && <span className="ec-timer">{formatClock(seconds)}</span>}
         </div>
 
@@ -157,6 +184,9 @@ export function SessionView() {
         <div className="ec-actions">
           <button className="ec-btn ec-btn--primary" onClick={start} disabled={!!sessionId}>Start speaking</button>
           <button className="ec-btn" onClick={end} disabled={!sessionId}>End session</button>
+          <button className="ec-btn" onClick={toggleMute} disabled={!sessionId} aria-pressed={muted}>
+            {muted ? "Unmute" : "Mute"}
+          </button>
         </div>
 
         {note && <p className="ec-intervention">{note}</p>}

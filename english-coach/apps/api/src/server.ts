@@ -7,9 +7,11 @@ import { selectSpeechProvider, selectAnalysisProvider, type SpeechConversationPr
 import { JobRunner } from "./workers/jobs.js";
 import { runAnalysis } from "./workers/analysis.js";
 import { runPlanner } from "./workers/planner.js";
+import { createLogger } from "./logger.js";
 
 async function main() {
   const env = loadEnv();
+  const logger = createLogger({ base: { service: "api" } });
   const sqlite = openDb(env.DB_PATH);
   migrate(sqlite);
   ensureSeed(sqlite);
@@ -28,11 +30,26 @@ async function main() {
         await runPlanner({ db: d, provider: speechAnalysis, sessionId: job.sessionId, now: Date.now() });
       }
     },
+    onFailed: (job, error) => {
+      // A job that gave up must not leave its session stuck in ANALYZING
+      // (spec §5: worker failures reach a terminal failure state).
+      logger.error("job.failed", { jobId: job.id, type: job.type, sessionId: job.sessionId, errorClass: error.class, error: error.message });
+      if (job.type === "analyze" && job.sessionId) {
+        service.failSession(job.sessionId, Date.now());
+      }
+    },
   });
   const queue: AppDeps["queue"] = (type, sessionId) => runner.enqueue(type, sessionId);
+  const retry: AppDeps["retry"] = (type, sessionId) => runner.reset(type, sessionId);
+  // The provider cache is per session; a finished session's provider must not
+  // stay in memory forever (defect C).
+  const releaseSpeech: AppDeps["releaseSpeech"] = (sessionId) => {
+    speechProviders.delete(sessionId);
+  };
   runner.start();
   const app = await buildApp({
-    service, db: d, registry, env, queue,
+    service, db: d, registry, env, queue, retry, releaseSpeech,
+    logger,
     selectSpeech: (sessionId) => {
       const existing = speechProviders.get(sessionId);
       if (existing) return existing;
@@ -62,6 +79,6 @@ async function main() {
     },
   });
   await app.listen({ port: env.PORT, host: env.HOST });
-  console.log(`english-coach api on ${env.HOST}:${env.PORT} (provider=${env.PROVIDER})`);
+  logger.info("server.listening", { host: env.HOST, port: env.PORT, provider: env.PROVIDER });
 }
 main();

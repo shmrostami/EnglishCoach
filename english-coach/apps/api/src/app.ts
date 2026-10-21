@@ -8,6 +8,7 @@ import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerLearnerRoutes } from "./routes/learners.js";
 import type { SpeechConversationProvider } from "@ec/openai";
 import type { DrizzleDb } from "@ec/db";
+import { createLogger, type Logger } from "./logger.js";
 
 export interface AppDeps {
   service: SessionService;
@@ -16,13 +17,25 @@ export interface AppDeps {
   selectSpeech: (sessionId: string) => SpeechConversationProvider;
   env: Env;
   queue: (type: "analyze", sessionId: string) => void;
+  /** Re-queue an existing failed job. Returns false when there is no job row. */
+  retry?: (type: "analyze", sessionId: string) => boolean;
+  /** Drop a cached provider so the next session gets a fresh one. */
+  releaseSpeech?: (sessionId: string) => void;
+  logger?: Logger;
 }
 
 export async function buildApp(deps: AppDeps) {
   const app = Fastify({ logger: false });
+  const log = deps.logger ?? createLogger();
   await app.register(fastifyWebsocket);
-  registerSessionRoutes(app, deps.service, deps.queue);
+  registerSessionRoutes(app, {
+    service: deps.service,
+    db: deps.db,
+    registry: deps.registry,
+    queue: deps.queue,
+    retry: deps.retry ?? (() => false),
+  });
   registerLearnerRoutes(app, deps.db);
-  registerWsRoutes(app, deps); // deps includes queue; bridge enqueues analysis on client end
+  registerWsRoutes(app, { ...deps, logger: log }); // deps includes queue; bridge enqueues analysis on client end
   return app;
 }

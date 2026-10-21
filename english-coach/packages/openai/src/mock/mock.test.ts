@@ -47,7 +47,7 @@ describe("MockAnalysisProvider", () => {
       metrics: {
         speakingSeconds: 12, userWordCount: 18, wordsPerMinute: 90,
         pauseCount: 1, avgPauseMs: 200, longestPauseMs: 200,
-        utteranceCount: 3, avgUtteranceWords: 6, rmsEnergyAvg: 0.2,
+        utteranceCount: 3, avgUtteranceWords: 6,
       },
       learnerContext: {
         level: "B1+", goals: ["fluency"], strengths: [], activeWeaknesses: [],

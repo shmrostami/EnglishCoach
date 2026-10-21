@@ -6,14 +6,21 @@ describe("ScoresSchema", () => {
   it("accepts a valid scores object", () => {
     const ok = ScoresSchema.parse({
       fluency: 0.71, grammar: 0.64, vocabulary: 0.73,
-      pronunciation: 0.78, coherence: 0.69, interaction: 0.82,
+      pronunciation: null, coherence: 0.69, interaction: 0.82,
     });
     expect(ok.fluency).toBe(0.71);
+  });
+  it("accepts a null pronunciation (not assessed)", () => {
+    const ok = ScoresSchema.parse({
+      fluency: 0.71, grammar: 0.64, vocabulary: 0.73,
+      pronunciation: null, coherence: 0.69, interaction: 0.82,
+    });
+    expect(ok.pronunciation).toBeNull();
   });
   it("rejects a score above 1", () => {
     expect(() => ScoresSchema.parse({
       fluency: 1.2, grammar: 0.64, vocabulary: 0.73,
-      pronunciation: 0.78, coherence: 0.69, interaction: 0.82,
+      pronunciation: null, coherence: 0.69, interaction: 0.82,
     })).toThrow();
   });
   it("rejects missing fields", () => {
@@ -23,7 +30,7 @@ describe("ScoresSchema", () => {
 
 describe("SessionAnalysisSchema", () => {
   const base = {
-    scores: { fluency: 0.7, grammar: 0.6, vocabulary: 0.7, pronunciation: 0.8, coherence: 0.7, interaction: 0.8 },
+    scores: { fluency: 0.7, grammar: 0.6, vocabulary: 0.7, pronunciation: null, coherence: 0.7, interaction: 0.8 },
     recurring_errors: [], strengths: [], recommended_targets: [],
   };
   it("accepts a valid analysis", () => {

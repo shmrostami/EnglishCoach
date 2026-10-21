@@ -50,6 +50,12 @@ function formatDay(ts: number): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+// The six scored dimensions, in the order the engine reports them.
+const SCORE_DIMENSIONS: [string, string][] = [
+  ["fluency", "Fluency"], ["grammar", "Grammar"], ["vocabulary", "Vocabulary"],
+  ["pronunciation", "Pronunciation"], ["coherence", "Coherence"], ["interaction", "Interaction"],
+];
+
 export function DashboardView() {
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [skills, setSkills] = useState<SkillRow[]>([]);
@@ -111,7 +117,7 @@ export function DashboardView() {
         </div>
       </div>
 
-      {plan && (
+      {plan ? (
         <div className="section">
           <h2 className="section__title">Next session</h2>
           <div className="ec-plan">
@@ -122,6 +128,13 @@ export function DashboardView() {
             </div>
             {plan.reasoning && <p className="ec-plan__meta" style={{ marginTop: 0.8 }}>{plan.reasoning}</p>}
           </div>
+        </div>
+      ) : (
+        // No plan is a valid state for a learner who has not finished a session
+        // yet — an empty card, not an error.
+        <div className="section">
+          <h2 className="section__title">Next session</h2>
+          <p className="ec-empty">No plan yet — finish a session and the coach will plan the next one.</p>
         </div>
       )}
 
@@ -171,7 +184,16 @@ export function DashboardView() {
                 return (
                   <tr key={r.id}>
                     <td>{formatDay(r.startedAt)}</td>
-                    <td>{r.topic ?? "—"}</td>
+                    <td>
+                      {r.topic ?? "—"}
+                      <div className="ec-ledger__scores">
+                        {SCORE_DIMENSIONS.map(([key, label]) => {
+                          const v = r.scores?.[key];
+                          // A null score means "not assessed" — never 0%.
+                          return <span key={key} className="ec-ledger__score">{label}: {v == null ? "not assessed" : formatPct(v)}</span>;
+                        })}
+                      </div>
+                    </td>
                     <td className="ec-ledger__overall" style={{ textAlign: "right" }}>{r.overall != null ? formatPct(r.overall) : "—"}</td>
                     <td className={"ec-ledger__delta" + (delta == null ? "" : delta >= 0 ? " ec-ledger__delta--up" : " ec-ledger__delta--down")} style={{ textAlign: "right" }}>
                       {delta == null ? "—" : `${delta >= 0 ? "+" : "−"}${formatPct(Math.abs(delta))}`}

@@ -37,7 +37,6 @@ export function newAccumulator(): MetricsAccumulator {
         longestPauseMs: longestPause,
         utteranceCount: turns.length,
         avgUtteranceWords: turns.length > 0 ? Math.round(userWordCount / turns.length) : 0,
-        rmsEnergyAvg: 0,
       };
     },
   };

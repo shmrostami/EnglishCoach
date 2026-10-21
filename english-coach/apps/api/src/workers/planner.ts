@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import {
   sessions, skills, errorPatterns, learningPlans, goalsTable,
   type DrizzleDb,
@@ -89,10 +89,12 @@ export async function runPlanner(opts: {
 
   const candidates = buildCandidates(d, session.learnerId, analysis, goalTypes, now);
 
-  // Difficulty: engine math on session history
+  // Difficulty: engine math on session history.
+  // `recentPerformance` takes the newest five scores, so the rows must arrive
+  // oldest→newest (it slices from the end).
   const pastScores = d.select().from(sessions)
     .where(and(eq(sessions.learnerId, session.learnerId), eq(sessions.status, "COMPLETED")))
-    .orderBy(desc(sessions.startedAt)).all()
+    .orderBy(asc(sessions.startedAt)).all()
     .map((s) => s.overallScore ?? 0);
   const currentDifficulty = session.plannedDifficulty ?? 0.5;
   const newDifficulty = adjustDifficulty(currentDifficulty, recentPerformance(pastScores.length > 0 ? pastScores : [0.5]));

@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import Database from "better-sqlite3";
 import { WebSocket } from "ws";
 import { buildApp } from "../src/app.js";
 import { openDb, db, migrate, ensureSeed } from "@ec/db";
 import { SessionService } from "../src/services/session.js";
-import { BridgeRegistry } from "../src/realtime/bridge.js";
+import { BridgeRegistry, RealtimeBridge } from "../src/realtime/bridge.js";
+import { JobRunner } from "../src/workers/jobs.js";
 import { MockSpeechProvider, type MockTurn, selectSpeechProvider, MOCK_DEMO_SCRIPT } from "@ec/openai";
 import { LEARNER_ID } from "@ec/domain";
 
@@ -16,26 +18,50 @@ const SCRIPT: MockTurn[] = [
 let app: Awaited<ReturnType<typeof buildApp>>;
 let url: string;
 let endedSessions: string[] = [];
+let sqlite: Database.Database;
+let service: SessionService;
+let registry: BridgeRegistry;
 
 beforeAll(async () => {
-  const sqlite = openDb(":memory:");
+  sqlite = openDb(":memory:");
   migrate(sqlite);
   ensureSeed(sqlite);
-  const service = new SessionService(db(sqlite));
-  const registry = new BridgeRegistry();
+  service = new SessionService(db(sqlite));
+  registry = new BridgeRegistry();
+  // A real JobRunner (never started, so it never polls) gives the retry route
+  // the same DB semantics the server has.
+  const runner = new JobRunner({ db: db(sqlite), handle: async () => {} });
   app = await buildApp({
     service,
     db: db(sqlite),
     registry,
     selectSpeech: () => new MockSpeechProvider({ turns: SCRIPT, autoClose: false }),
     env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 60_000, OPENAI_API_KEY: undefined },
-    queue: (type, sessionId) => { if (type === "analyze") endedSessions.push(sessionId); },
+    queue: (type, sessionId) => {
+      if (type === "analyze") endedSessions.push(sessionId);
+      runner.enqueue(type, sessionId);
+    },
+    retry: (type, sessionId) => runner.reset(type, sessionId),
   });
   await app.listen({ port: 0, host: "127.0.0.1" });
   url = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
 });
 
 afterAll(async () => { await app.close(); });
+
+/**
+ * Wait for a condition instead of a fixed number of milliseconds — the mock
+ * provider plays its script on timers, so a hardcoded wait could land before
+ * the script had finished under load.
+ */
+async function waitFor(predicate: () => boolean, what: string, timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) return;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
 
 describe("HTTP API", () => {
   it("creates a session and rejects unknown learner ids", async () => {
@@ -55,11 +81,104 @@ describe("HTTP API", () => {
     expect(endedSessions.filter((s) => s === created.sessionId)).toHaveLength(1);
   });
 
+  it("tears the live provider down when the session ends over HTTP", async () => {
+    const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
+    let closeCalls = 0;
+    const provider = {
+      connect: async () => {},
+      sendAudio: () => {},
+      sendInstruction: () => {},
+      close: () => { closeCalls += 1; },
+    };
+    const bridge = new RealtimeBridge({
+      sessionId: created.sessionId, provider, service,
+      learnerContext: service.getLearnerContext(created.sessionId),
+      difficulty: 0.5, warmupMs: 999_999, sessionTargetMs: 999_999, onEnded: () => {},
+    });
+    registry.set(created.sessionId, bridge);
+
+    const res = await app.inject({ method: "POST", url: `/v1/sessions/${created.sessionId}/end` });
+    expect(res.statusCode).toBe(200);
+    expect(closeCalls).toBe(1); // the provider session is not orphaned
+    // Ending over HTTP is a normal end, not a failure.
+    const detail = await app.inject({ method: "GET", url: `/v1/sessions/${created.sessionId}` });
+    expect((detail.json() as { state: string }).state).toBe("ANALYZING");
+    expect(endedSessions.filter((s) => s === created.sessionId)).toHaveLength(1);
+  });
+
   it("returns session state and transcript via GET", async () => {
     const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
     const res = await app.inject({ method: "GET", url: `/v1/sessions/${created.sessionId}` });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveProperty("state");
+  });
+
+  it("returns the persisted scores, analysis and metrics from the session detail endpoint", async () => {
+    const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
+    sqlite.prepare(
+      "UPDATE sessions SET status='COMPLETED', fluency_score=0.7, grammar_score=0.6, vocabulary_score=0.8, pronunciation_score=NULL, coherence_score=0.55, interaction_score=0.9, overall_score=0.72, analysis=?, metrics=? WHERE id=?",
+    ).run(
+      JSON.stringify({ scores: { fluency: 0.7, grammar: 0.6, vocabulary: 0.8, pronunciation: null, coherence: 0.55, interaction: 0.9 } }),
+      JSON.stringify({ speakingSeconds: 12, userWordCount: 20, wordsPerMinute: 100, pauseCount: 1, avgPauseMs: 300, longestPauseMs: 900, utteranceCount: 4, avgUtteranceWords: 5 }),
+      created.sessionId,
+    );
+    const res = await app.inject({ method: "GET", url: `/v1/sessions/${created.sessionId}` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      state: string;
+      scores: { fluency: number; pronunciation: number | null } | null;
+      analysis: { scores: { fluency: number } } | null;
+      metrics: { speakingSeconds: number } | null;
+    };
+    expect(body.state).toBe("COMPLETED");
+    expect(body.scores?.fluency).toBe(0.7);
+    // Not assessed → null, never 0 (spec §12.1).
+    expect(body.scores?.pronunciation).toBeNull();
+    expect(body.analysis?.scores?.fluency).toBe(0.7);
+    expect(body.metrics?.speakingSeconds).toBe(12);
+  });
+
+  it("answers the learning plan with 200 null when there is no plan (empty state, not an error)", async () => {
+    const res = await app.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/learning-plan` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("application/json");
+    expect(res.body).toBe("null");
+  });
+
+  it("re-enqueues a failed analysis job and refuses an already-analyzed session", async () => {
+    const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
+    // A failed job row exists for this session (the runner exhausted its attempts).
+    const jobId = "job-failed-1";
+    sqlite.prepare(
+      "INSERT INTO jobs (id, type, session_id, status, attempts, max_attempts, error, created_at, done_at) VALUES (?,?,?,?,?,?,?,?,?)",
+    ).run(jobId, "analyze", created.sessionId, "failed", 3, 3, "boom", Date.now(), Date.now());
+    sqlite.prepare(
+      "INSERT INTO job_attempts (id, job_id, attempt, status, error_class, error, started_at, finished_at) VALUES (?,?,?,?,?,?,?,?)",
+    ).run("att-1", jobId, 3, "failed", "provider", "boom", Date.now(), Date.now());
+
+    const listed = await app.inject({ method: "GET", url: "/v1/jobs/failed" });
+    expect(listed.statusCode).toBe(200);
+    const failed = listed.json() as { id: string; sessionId: string; history: { attempt: number; errorClass: string }[] }[];
+    const row = failed.find((j) => j.id === jobId);
+    expect(row).toBeTruthy();
+    expect(row?.sessionId).toBe(created.sessionId);
+    expect(row?.history[0]).toMatchObject({ attempt: 3, errorClass: "provider" });
+
+    // The retry flips the existing job back to pending (UNIQUE(session_id,type)
+    // makes a fresh insert impossible) — the job is not duplicated.
+    const retried = await app.inject({ method: "POST", url: `/v1/sessions/${created.sessionId}/analyze` });
+    expect(retried.statusCode).toBe(200);
+    expect(retried.json()).toMatchObject({ state: "QUEUED" });
+    const job = sqlite.prepare("SELECT status, attempts FROM jobs WHERE id = ?").get(jobId) as { status: string; attempts: number };
+    expect(job.status).toBe("pending");
+    expect(job.attempts).toBe(0);
+    const count = sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE session_id = ?").get(created.sessionId) as { n: number };
+    expect(count.n).toBe(1);
+
+    // A completed session cannot be re-analyzed.
+    sqlite.prepare("UPDATE sessions SET status='COMPLETED' WHERE id=?").run(created.sessionId);
+    const refused = await app.inject({ method: "POST", url: `/v1/sessions/${created.sessionId}/analyze` });
+    expect(refused.statusCode).toBe(409);
   });
 
   it("mock mode plays the scripted demo end-to-end (README promise; the real factory wiring)", async () => {
@@ -87,14 +206,25 @@ describe("HTTP API", () => {
     const events: any[] = [];
     ws.on("message", (raw) => { events.push(JSON.parse(String(raw))); });
     await new Promise<void>((resolve) => { ws.on("open", resolve); });
-    await new Promise((r) => setTimeout(r, 700)); // script: 6 turns x 25ms + toolCall
+    // The demo script: 7 turns x 25 ms, and the tool call fires 50 ms after
+    // the learner's third turn. Wait for both instead of guessing how long
+    // the script takes.
+    await waitFor(
+      () =>
+        events.filter((m) => m.t === "transcript" && m.speaker === "learner").length >= 3 &&
+        events.some((m) => m.t === "intervention"),
+      "the scripted conversation and its tool call",
+    );
 
     const learnerTurns = events.filter((m) => m.t === "transcript" && m.speaker === "learner");
     expect(learnerTurns.length).toBeGreaterThanOrEqual(3); // the scripted learner spoke (recurring past-tense error)
     expect(events.some((m) => m.t === "intervention" && m.kind === "micro_coach")).toBe(true); // tool call fired
 
     ws.send(JSON.stringify({ t: "control", action: "end" }));
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(
+      () => events.some((m) => m.t === "session_ended"),
+      "the session_ended message",
+    );
     expect(events.some((m) => m.t === "session_ended" && m.state === "ANALYZING")).toBe(true); // client end -> analysis, not FAILED
     expect(endedSessions.filter((s) => s === created.sessionId)).toHaveLength(1);
     ws.close();
@@ -114,11 +244,17 @@ describe("WebSocket session protocol", () => {
       ws.on("open", () => resolve());
     });
     // wait for the script to play out
-    await new Promise((r) => setTimeout(r, 600));
+    await waitFor(
+      () => messages.some((m) => m.t === "transcript" && m.speaker === "learner"),
+      "the scripted learner turn",
+    );
     expect(messages.some((m) => m.t === "state" && m.state === "WARMUP")).toBe(true);
     expect(messages.some((m) => m.t === "transcript" && m.speaker === "learner")).toBe(true);
     ws.send(JSON.stringify({ t: "control", action: "end" }));
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(
+      () => messages.some((m) => m.t === "session_ended"),
+      "the session_ended message",
+    );
     expect(messages.some((m) => m.t === "session_ended" && m.state === "ANALYZING")).toBe(true);
     ws.close();
   }, 10_000);

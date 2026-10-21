@@ -26,7 +26,10 @@ const SKIP = !python || !existsSync(SCRIPT);
 function readline(child: ChildProcess, timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     let buf = "";
-    const timer = setTimeout(() => reject(new Error("timeout waiting for a stdout line")), timeoutMs);
+    const timer = setTimeout(
+      () => reject(new Error(`timeout waiting for a stdout line (stderr: ${stderrTail.trim() || "empty"})`)),
+      timeoutMs,
+    );
     const onData = (d: Buffer) => {
       buf += d.toString("utf8");
       const idx = buf.indexOf("\n");
@@ -42,6 +45,9 @@ function readline(child: ChildProcess, timeoutMs: number): Promise<string> {
   });
 }
 
+/** The child's stderr, kept so a failed handshake can say WHY. */
+let stderrTail = "";
+
 describe.skipIf(SKIP)("voice_sidecar.py (real Python)", () => {
   let child: ChildProcess;
 
@@ -49,14 +55,19 @@ describe.skipIf(SKIP)("voice_sidecar.py (real Python)", () => {
   const SILENCE = Buffer.alloc(32000).toString("hex");
 
   it("loads Whisper, announces ready, transcribes, pings, tolerates bad input, and exits on bye", async () => {
+    stderrTail = "";
     child = spawn(python!, [SCRIPT], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, WHISPER_MODEL: "small", PIPER_DATA_DIR: "data/piper" },
     });
+    child.stderr!.on("data", (d: Buffer) => { stderrTail = (stderrTail + d.toString("utf8")).slice(-4_000); });
 
     // 1) ready handshake (Whisper load is a ~4 s cache-hit here; allow plenty)
     const ready = JSON.parse(await readline(child, 120_000)) as { ready?: boolean };
-    expect(ready.ready).toBe(true);
+    // The child's own stderr is the difference between "Whisper is still
+    // loading" and "faster_whisper is not installed" — without it a timeout
+    // is indistinguishable from a broken install.
+    expect(ready.ready, `sidecar stderr: ${stderrTail}`).toBe(true);
 
     // 2) stt over the wire (hex PCM16 in, text out). Silence must not throw.
     child.stdin!.write(JSON.stringify({ op: "stt", audio: SILENCE }) + "\n");

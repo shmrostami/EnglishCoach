@@ -36,7 +36,18 @@ export interface PlanInput {
   learnerContext: LearnerContext;
 }
 
+/**
+ * What a provider can actually evidence. A provider that reads only the
+ * transcript cannot support a pronunciation score (spec §12.1), so it
+ * declares `pronunciationEvidence: false` and the worker strips any number.
+ */
+export interface ProviderCapabilities {
+  pronunciationEvidence: boolean;
+}
+
 export interface AnalysisProvider {
+  /** Declared once, by the provider itself. */
+  readonly capabilities: ProviderCapabilities;
   analyze(input: AnalysisInput): Promise<SessionAnalysis>;
   plan(input: PlanInput): Promise<PlanDraft>;
 }

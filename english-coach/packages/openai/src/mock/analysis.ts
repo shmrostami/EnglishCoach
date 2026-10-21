@@ -26,6 +26,10 @@ const LEXICON: LexiconEntry[] = [
 ];
 
 export class MockAnalysisProvider implements AnalysisProvider {
+  // The mock scores from transcript text and metrics only — it has no acoustic
+  // evidence, so it never claims a pronunciation score.
+  readonly capabilities = { pronunciationEvidence: false };
+
   async analyze(input: AnalysisInput): Promise<SessionAnalysis> {
     const learnerTurns = input.transcript.filter((t) => t.speaker === "learner");
     const observations: SessionAnalysis["observations"] = [];
@@ -82,7 +86,8 @@ function deterministicScores(m: SessionMetrics): SessionAnalysis["scores"] {
     fluency,
     grammar: 0.62,
     vocabulary: 0.7,
-    pronunciation: 0.78,
+    // Not assessed: no audio-grounded evidence (spec §12.1).
+    pronunciation: null,
     coherence: 0.7,
     interaction: 0.8,
   };

@@ -8,6 +8,10 @@ import type { AnalysisInput, AnalysisProvider } from "../providers/types.js";
 import { MODEL_CONFIG } from "../models.js";
 
 export class OpenAIAnalysisProvider implements AnalysisProvider {
+  // The model reads text, not audio: it cannot ground a pronunciation score
+  // (spec §12.1), so the worker strips any number it returns.
+  readonly capabilities = { pronunciationEvidence: false };
+
   private client: OpenAI;
   constructor(private readonly apiKey: string) {
     this.client = new OpenAI({ apiKey });

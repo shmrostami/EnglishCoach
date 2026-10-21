@@ -13,6 +13,10 @@ export interface SidecarOptions {
   env?: Record<string, string>;
   requestTimeoutMs?: number;
   readyTimeoutMs?: number;
+  /** Receives the child's stderr. The tail of it is what a failed startup
+   *  (missing model, bad import) looks like, so a test can see WHY the
+   *  handshake failed instead of only that it did. */
+  stderr?: (chunk: string) => void;
 }
 
 interface Pending {
@@ -44,10 +48,13 @@ export class VoiceSidecar {
   private crashHandler: ((code: number | null) => void) | null = null;
   private crashFired = false;
   private closed = false;
+  /** Optional sink for the child's stderr (see SidecarOptions.stderr). */
+  private readonly onStderr?: (chunk: string) => void;
 
   constructor(opts: SidecarOptions) {
     this.python = opts.python;
     this.script = opts.script;
+    this.onStderr = opts.stderr;
     // Strip null/undefined: callers pass optional config through, and spawn()
     // rejects non-string env values.
     const merged: NodeJS.ProcessEnv = { ...process.env };
@@ -68,7 +75,9 @@ export class VoiceSidecar {
     child.stderr!.on("data", (d: Buffer) => {
       // Surfaced on the next ready() reject — the child's traceback is the
       // "pip install faster-whisper piper-tts" a user actually needs to see.
-      this.stderrTail = (this.stderrTail + d.toString("utf8")).slice(-2_000);
+      const text = d.toString("utf8");
+      this.stderrTail = (this.stderrTail + text).slice(-2_000);
+      this.onStderr?.(text);
     });
     child.on("exit", (code) => this.onExit(code));
     // A spawn failure (python missing / bad path) arrives as 'error'. An

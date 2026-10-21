@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { eq, and, desc } from "drizzle-orm";
-import { learners, goalsTable, skills, learningPlans, sessions, type DrizzleDb } from "@ec/db";
+import { learners, goalsTable, skills, learningPlans, sessions, tryParseJson, type DrizzleDb } from "@ec/db";
 import { randomUUID } from "node:crypto";
 
 export function registerLearnerRoutes(app: FastifyInstance, d: DrizzleDb): void {
@@ -26,11 +26,13 @@ export function registerLearnerRoutes(app: FastifyInstance, d: DrizzleDb): void 
     const plan = d.select().from(learningPlans)
       .where(and(eq(learningPlans.learnerId, id), eq(learningPlans.status, "active")))
       .orderBy(desc(learningPlans.createdAt)).all()[0];
-    if (!plan) return reply.code(404).send({ error: "no active plan" });
+    // No plan is a valid empty state, not an error: the dashboard must load for
+    // a learner who has never completed a session (spec §5).
+    if (!plan) return reply.type("application/json").send("null");
     return {
       id: plan.id, difficulty: plan.difficulty,
-      primaryTargets: JSON.parse(plan.primaryTargets),
-      secondaryTargets: plan.secondaryTargets ? JSON.parse(plan.secondaryTargets) : [],
+      primaryTargets: tryParseJson<string[]>(plan.primaryTargets) ?? [],
+      secondaryTargets: tryParseJson<string[]>(plan.secondaryTargets) ?? [],
       interventionType: plan.interventionType, topic: plan.topic,
       reasoning: plan.reasoning, status: plan.status, createdAt: plan.createdAt,
     };

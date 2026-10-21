@@ -20,7 +20,9 @@ export interface SkillState {
 
 export interface Scores {
   fluency: number; grammar: number; vocabulary: number;
-  pronunciation: number; coherence: number; interaction: number;
+  // null = "not assessed". Pronunciation is only measurable from audio-grounded
+  // evidence, so a text-only analysis must leave it null (spec §12.1).
+  pronunciation: number | null; coherence: number; interaction: number;
 }
 
 export interface Observation {
@@ -53,7 +55,6 @@ export interface SessionMetrics {
   longestPauseMs: number;
   utteranceCount: number;
   avgUtteranceWords: number;
-  rmsEnergyAvg: number;
 }
 
 export interface LearnerContext {

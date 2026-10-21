@@ -139,6 +139,30 @@ export const jobs = sqliteTable("jobs", {
   doneAt: integer("done_at"),
 }, (t) => ({ uq_jobs_session_type: unique().on(t.sessionId, t.type) }));
 
+// Live coaching actions, kept out of `observations` (spec §23): observations are
+// assessment evidence, interventions are what the coach did mid-conversation.
+export const interventions = sqliteTable("interventions", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => sessions.id),
+  kind: text("kind").notNull(),
+  skillCode: text("skill_code"),
+  state: text("state"),
+  createdAt: integer("created_at").notNull(),
+});
+
+// Attempt history: `jobs` keeps only the latest error, so a failed job has no
+// history and no error class without this table (spec §10.3).
+export const jobAttempts = sqliteTable("job_attempts", {
+  id: text("id").primaryKey(),
+  jobId: text("job_id").notNull().references(() => jobs.id),
+  attempt: integer("attempt").notNull(),
+  status: text("status").notNull(),
+  errorClass: text("error_class"),
+  error: text("error"),
+  startedAt: integer("started_at").notNull(),
+  finishedAt: integer("finished_at"),
+});
+
 export type SkillRow = typeof skills.$inferSelect;
 export type ErrorRow = typeof errorPatterns.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
@@ -147,3 +171,5 @@ export type GoalRow = typeof goalsTable.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
 export type UtteranceRow = typeof utterances.$inferSelect;
 export type ObservationRow = typeof observations.$inferSelect;
+export type InterventionRow = typeof interventions.$inferSelect;
+export type JobAttemptRow = typeof jobAttempts.$inferSelect;

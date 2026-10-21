@@ -24,3 +24,17 @@ export function db(database: Database.Database): DrizzleDb {
 export function parseJson<T>(s: string | null): T | null {
   return s === null ? null : (JSON.parse(s) as T);
 }
+
+/**
+ * Like `parseJson` but never throws. Persisted analysis/metrics JSON can be
+ * malformed (hand-edited DB, a truncated write), and a read path must not
+ * take the whole request down over it.
+ */
+export function tryParseJson<T>(s: string | null): T | null {
+  if (s === null) return null;
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return null;
+  }
+}

@@ -261,6 +261,31 @@ body::before {
   letter-spacing: 0.03em;
 }
 
+/* the connection chip — the socket's own state, so a drop is never silent */
+.ec-conn {
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+}
+.ec-conn--open { color: var(--live); border-color: var(--live); }
+.ec-conn--reconnecting { color: var(--warn, var(--ink-soft)); }
+.ec-conn--closed { color: var(--ink-faint); }
+
+/* the per-session score breakdown under the topic */
+.ec-ledger__scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+.ec-ledger__score { white-space: nowrap; }
+
 /* the on-air waveform — breathes while the voice is live */
 .ec-wave {
   display: flex;

@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, desc } from "drizzle-orm";
 import {
-  sessions, utterances, observations, learningPlans,
+  sessions, utterances, interventions, learningPlans, tryParseJson,
 } from "@ec/db";
-import type { DrizzleDb } from "@ec/db";
-import type { LearnerContext, SessionMetrics, SessionRecord, SessionState } from "@ec/domain";
+import type { DrizzleDb, SessionRow } from "@ec/db";
+import type {
+  LearnerContext, Scores, SessionAnalysis, SessionMetrics, SessionRecord, SessionState,
+} from "@ec/domain";
 import { canTransition } from "../stateMachine.js";
 import { computeMetrics } from "../metrics.js";
 import { buildLearnerContext } from "../workers/context.js";
@@ -28,10 +30,12 @@ export class SessionService {
   }
 
   recordUtterance(sessionId: string, turn: { speaker: "learner" | "coach"; text: string; startedAt: number; endedAt: number }): { utteranceId: string; seq: number } {
+    // The previous learner turn is found by speaker, never by the parity of its
+    // sequence number (spec §10.3: no speaker inference from odd/even ids).
     const last = this.d.select().from(utterances)
       .where(and(eq(utterances.sessionId, sessionId), eq(utterances.speaker, "learner")))
       .orderBy(utterances.sequenceNumber).all()
-      .filter((u) => u.sequenceNumber % 2 === 1).at(-1);
+      .at(-1);
     const pauseBeforeMs = last ? Math.max(0, turn.startedAt - (last.endedAt ?? turn.startedAt)) : 0;
     const seq = (this.d.select().from(utterances).where(eq(utterances.sessionId, sessionId)).all().length) + 1;
     const id = `utt-${randomUUID()}`;
@@ -46,10 +50,11 @@ export class SessionService {
   }
 
   recordIntervention(sessionId: string, kind: "micro_coach" | "target_retry" | "challenge", skill: string, now: number): void {
-    this.d.insert(observations).values({
-      id: `obs-${randomUUID()}`, sessionId, type: kind,
-      skillCode: skill, evidence: null,
-      severity: null, confidence: 0.9, createdAt: now,
+    // Interventions are coaching actions, not assessment evidence: they go to
+    // their own table so `observations` keeps only assessed observations
+    // (spec §23 separation).
+    this.d.insert(interventions).values({
+      id: `int-${randomUUID()}`, sessionId, kind, skillCode: skill, state: null, createdAt: now,
     }).run();
   }
 
@@ -69,7 +74,33 @@ export class SessionService {
       plannedDifficulty: r.plannedDifficulty ?? 0,
       achievedDifficulty: r.achievedDifficulty ?? r.plannedDifficulty ?? 0,
       startedAt: r.startedAt, endedAt: r.endedAt,
-      scores: null, analysis: null, metrics: null, // filled by Task 7
+      scores: this.readScores(r),
+      analysis: tryParseJson<SessionAnalysis>(r.analysis),
+      metrics: tryParseJson<SessionMetrics>(r.metrics),
+    };
+  }
+
+  /**
+   * The six scores live in their own columns, so they are rebuilt from the row
+   * rather than parsed.
+   *
+   * Pronunciation is the one dimension that can be unmeasured: it stays null
+   * ("not assessed", spec §12.1). The other five are always written together by
+   * the analysis worker in a single UPDATE, so a null column there means the
+   * row has no scores at all — which the `any` check below catches — and the
+   * `?? 0` is a type-level fallback, not a measurement.
+   */
+  private readScores(r: SessionRow): Scores | null {
+    const any = [r.fluencyScore, r.grammarScore, r.vocabularyScore,
+      r.pronunciationScore, r.coherenceScore, r.interactionScore].some((v) => v !== null);
+    if (!any) return null;
+    return {
+      fluency: r.fluencyScore ?? 0,
+      grammar: r.grammarScore ?? 0,
+      vocabulary: r.vocabularyScore ?? 0,
+      pronunciation: r.pronunciationScore ?? null,
+      coherence: r.coherenceScore ?? 0,
+      interaction: r.interactionScore ?? 0,
     };
   }
 
@@ -85,6 +116,19 @@ export class SessionService {
     const s = this.d.select().from(sessions).where(eq(sessions.id, sessionId)).all()[0];
     if (!s) throw new Error(`unknown session ${sessionId}`);
     return buildLearnerContext(this.d, s.learnerId, sessionId, Date.now());
+  }
+
+  /**
+   * Marks a session as terminally failed. Used when a background job gives up:
+   * without it the session sits in ANALYZING forever (spec §5 "worker failures
+   * reach a retryable or terminal failure state").
+   */
+  failSession(sessionId: string, now: number): boolean {
+    const row = this.d.select().from(sessions).where(eq(sessions.id, sessionId)).all()[0];
+    if (!row) return false;
+    if (!canTransition(row.status as SessionState, "FAILED")) return false;
+    this.d.update(sessions).set({ status: "FAILED", endedAt: row.endedAt ?? now }).where(eq(sessions.id, sessionId)).run();
+    return true;
   }
 
   endSession(sessionId: string, now: number): { ok: boolean; reason?: string; metrics: SessionMetrics } {
@@ -110,5 +154,5 @@ export class SessionService {
 }
 
 function emptyMetrics(): SessionMetrics {
-  return { speakingSeconds: 0, userWordCount: 0, wordsPerMinute: 0, pauseCount: 0, avgPauseMs: 0, longestPauseMs: 0, utteranceCount: 0, avgUtteranceWords: 0, rmsEnergyAvg: 0 };
+  return { speakingSeconds: 0, userWordCount: 0, wordsPerMinute: 0, pauseCount: 0, avgPauseMs: 0, longestPauseMs: 0, utteranceCount: 0, avgUtteranceWords: 0 };
 }

@@ -12,7 +12,10 @@ Evaluate:
 7. Sentence complexity
 8. Coherence
 9. Interaction
-10. Pronunciation indicators available from the audio/transcript
+
+Do NOT score pronunciation. You see text only, so you have no acoustic
+evidence: "pronunciation" must be null in the JSON you return. A non-null
+pronunciation score will be discarded.
 
 Deterministic audio metrics (measured, not to be guessed):
 {{metrics}}
@@ -32,7 +35,7 @@ Identify recurring patterns (3+ high-confidence occurrences).
 Return ONLY a JSON object with exactly this shape:
 {
   "scores": { "fluency": 0..1, "grammar": 0..1, "vocabulary": 0..1,
-               "pronunciation": 0..1, "coherence": 0..1, "interaction": 0..1 },
+               "pronunciation": null, "coherence": 0..1, "interaction": 0..1 },
   "observations": [
     { "type": "language_error|strength|vocabulary_use|fluency_signal",
       "skill": "<skill code>", "evidence": "<quote from transcript>",

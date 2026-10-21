@@ -13,7 +13,7 @@ export const SkillStateSchema = z.object({
 
 export const ScoresSchema = z.object({
   fluency: unit, grammar: unit, vocabulary: unit,
-  pronunciation: unit, coherence: unit, interaction: unit,
+  pronunciation: unit.nullable(), coherence: unit, interaction: unit,
 });
 
 export const ObservationSchema = z.object({
@@ -43,7 +43,6 @@ export const SessionMetricsSchema = z.object({
   longestPauseMs: z.number().nonnegative(),
   utteranceCount: z.number().int().nonnegative(),
   avgUtteranceWords: z.number().nonnegative(),
-  rmsEnergyAvg: z.number().nonnegative(),
 });
 
 export const LearnerContextSchema = z.object({
