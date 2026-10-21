@@ -327,12 +327,12 @@
   <p class="lede">What the app actually does, where each piece lives, and which parts of the design document never made it into code. Built by reading the source, not the docs.</p>
 
   <div class="stats">
-    <div class="stat"><b>6</b><span>web routes</span></div>
-    <div class="stat"><b>18</b><span>HTTP + WS routes</span></div>
+    <div class="stat"><b>7</b><span>web routes</span></div>
+    <div class="stat"><b>26</b><span>HTTP + WS routes</span></div>
     <div class="stat"><b>10</b><span>session states</span></div>
     <div class="stat"><b>20</b><span>skill codes</span></div>
     <div class="stat"><b>3</b><span>provider modes</span></div>
-    <div class="stat"><b>224</b><span>tests, 37 files</span></div>
+    <div class="stat"><b>241</b><span>tests, 39 files</span></div>
   </div>
 
   <section>
@@ -381,7 +381,7 @@
 
   <section>
     <h2>Screens</h2>
-    <p class="note">Six routes, each under its own error boundary. No settings, no history browser, no profile screen, no error-pattern view, and no control to accept or dismiss a correction — the transcript exists only while a session is live.</p>
+    <p class="note">Seven routes, each under its own error boundary. No settings, no history browser, no profile screen, no error-pattern view, and no control to accept or dismiss a correction — the transcript exists only while a session is live.</p>
     <div class="grid2">
       <div class="card">
         <h3><code>/</code> Session</h3>
@@ -394,6 +394,10 @@
       <div class="card">
         <h3><code>/review</code> and <code>/review/:sessionId</code></h3>
         <p>The newest completed session, or a named one: dimension scores with "not assessed" for an unmeasured dimension, strengths, up to three corrections (original → suggested, with an explanation), vocabulary to keep, and the next session's topic, targets and reason. Handles loading, no-session, still-analysing and failed-analysis states.</p>
+      </div>
+      <div class="card">
+        <h3><code>/practice</code></h3>
+        <p>A one-time placement from three self-ratings — labelled self-report, confidence capped at 50% — the objectives it seeds, and the recommended guided-speaking activity with its prompt, target skills and words.</p>
       </div>
       <div class="card">
         <h3><code>/settings</code></h3>
@@ -422,6 +426,10 @@
           <tr><td><code>POST /v1/sessions/:id/end</code></td><td>Ends once, computes metrics, enqueues analysis, tears down the live bridge and releases the cached provider.</td></tr>
           <tr><td><code>POST /v1/sessions/:id/analyze</code></td><td>Re-queues a failed analysis; 409 for an already-analyzed session.</td></tr>
           <tr><td><code>GET /v1/sessions/:id/feedback</code></td><td>Persisted post-session review: scores, unassessed dimensions, strengths, stored corrections with their learner action, vocabulary, and the next plan's topic, targets and reason. Not analysed yet → <code>200</code> with <code>feedback: null</code> and the session state.</td></tr>
+          <tr><td><code>GET/POST …/objectives</code></td><td>Learning objectives, highest priority first.</td></tr>
+          <tr><td><code>GET …/activities/recommended</code></td><td>The guided-speaking activity for the top objective, generated once per objective. No objective is a valid empty state.</td></tr>
+          <tr><td><code>POST …/activities/:id/attempts</code> · <code>…/activity-attempts/:id/submit</code></td><td>Starts and scores an attempt against the session transcript. Pronunciation and the activity's own target skill are reported as <code>not_assessed</code>, with the reason in the summary.</td></tr>
+          <tr><td><code>POST/GET …/diagnostic</code></td><td>Self-report placement. Stored, labelled <code>self_report</code>, confidence ≤ 0.5, and it never writes skill mastery.</td></tr>
           <tr><td><code>GET …/errors</code></td><td>Recurring error patterns with frequency, decayed effective frequency, severity, confidence, a representative correction, and a trend that stays <code>null</code> until two sessions carry evidence.</td></tr>
           <tr><td><code>GET …/review-queue</code></td><td>Due vocabulary within a review budget, alternating recognition with production.</td></tr>
           <tr><td><code>POST …/reviews/:word/attempts</code></td><td>Records an attempt and reschedules from it.</td></tr>
@@ -475,6 +483,8 @@
           <tr><td><code>difficulty</code></td><td>±0.02 to ±0.05 steps clamped between 0.15 and 0.95.</td></tr>
           <tr><td><code>prioritization</code></td><td>Six-term priority: recurrence, severity, goal relevance, communicative impact, readiness, forgetting risk.</td></tr>
           <tr><td><code>planning</code></td><td>Target selection, intervention choice, CEFR banding.</td></tr>
+          <tr><td><code>activity</code></td><td>Deterministic activity result: word coverage and speaking time scored; anything the activity cannot evidence is <code>not_assessed</code> and said so in words.</td></tr>
+          <tr><td><code>diagnostic</code></td><td>Self-report placement: band, difficulty, confidence capped at 0.5, weekly frequency capped at seven.</td></tr>
           <tr><td><code>review</code></td><td>Documented interval policy — correct recall ×2.5, a lapse back to one day, capped at 180. Deliberately <strong>not</strong> SM-2 or FSRS and not claimed to be. Queue picks due items within a budget and alternates recognition with production.</td></tr>
           <tr><td><code>feedback</code></td><td>The review shape from a stored analysis: unassessed dimensions, top-three strengths, top-three corrections, deduped vocabulary. A suggested sentence is produced only when the wrong form actually occurs in the quoted evidence — otherwise it stays <code>null</code> rather than being invented.</td></tr>
         </tbody>
@@ -561,7 +571,7 @@
   </section>
 
   <footer>
-    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization, post-session feedback, and review/settings slices. Paths are relative to the repository root. Test count reflects a green run of the full suite.
+    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization, post-session feedback, review/settings, and activity/diagnostic slices. Paths are relative to the repository root. Test count reflects a green run of the full suite.
   </footer>
 
 </div>

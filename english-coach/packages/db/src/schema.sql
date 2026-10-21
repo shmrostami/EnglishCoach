@@ -207,3 +207,75 @@ CREATE TABLE review_attempts (
   scheduler_version TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+-- Learning objectives (spec §6.2): what a learner is working toward, separate
+-- from a session. `success_criteria` is a JSON object so a rubric can grow
+-- without a migration.
+CREATE TABLE learning_objectives (
+  id TEXT PRIMARY KEY,
+  learner_id TEXT NOT NULL REFERENCES learners(id),
+  goal_id TEXT REFERENCES learner_goals(id),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  skill_codes TEXT NOT NULL,
+  success_criteria TEXT,
+  priority REAL NOT NULL DEFAULT 0.5,
+  status TEXT NOT NULL DEFAULT 'planned',
+  due_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- An exercise the learner can be asked to do (spec §6.3). `type` is the
+-- activity kind, `input/output_modality` are JSON arrays of strings.
+CREATE TABLE activities (
+  id TEXT PRIMARY KEY,
+  learner_id TEXT NOT NULL REFERENCES learners(id),
+  version INTEGER NOT NULL DEFAULT 1,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  objective_ids TEXT NOT NULL,
+  target_skill_codes TEXT NOT NULL,
+  difficulty REAL NOT NULL,
+  estimated_minutes INTEGER NOT NULL,
+  input_modality TEXT NOT NULL,
+  output_modality TEXT NOT NULL,
+  rubric_version TEXT,
+  success_criteria TEXT,
+  -- The prompt the guided-speaking activity asks for. Null for activity types
+  -- that generate their own content.
+  prompt TEXT,
+  created_at INTEGER NOT NULL
+);
+
+-- One run through an activity (spec §6.3). Session-backed for speaking
+-- activities; `session_id` is null for activities that have no live session.
+CREATE TABLE activity_attempts (
+  id TEXT PRIMARY KEY,
+  learner_id TEXT NOT NULL REFERENCES learners(id),
+  activity_id TEXT NOT NULL REFERENCES activities(id),
+  activity_version INTEGER NOT NULL,
+  session_id TEXT REFERENCES sessions(id),
+  status TEXT NOT NULL,
+  started_at INTEGER,
+  completed_at INTEGER,
+  -- JSON: the deterministic check result, so a result never has to be
+  -- recomputed to be read.
+  result TEXT,
+  created_at INTEGER NOT NULL
+);
+
+-- Diagnostic onboarding (spec §5 Phase 2, backlog item 12). Stored so the
+-- placement is auditable and the learner can see what it was based on:
+-- `basis` is always 'self_report', never an assessment.
+CREATE TABLE diagnostics (
+  id TEXT PRIMARY KEY,
+  learner_id TEXT NOT NULL REFERENCES learners(id),
+  band TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  difficulty REAL NOT NULL,
+  focus_skills TEXT NOT NULL,
+  basis TEXT NOT NULL,
+  rubric_version TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);

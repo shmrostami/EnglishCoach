@@ -28,7 +28,7 @@ correction style, 15-minute sessions) and three active goals on every start, ide
 
 ## 2. Web routes
 
-Six routes, each under its own error boundary (`apps/web/src/App.tsx`).
+Seven routes, each under its own error boundary (`apps/web/src/App.tsx`).
 
 | Route | File | Capability |
 |---|---|---|
@@ -36,6 +36,7 @@ Six routes, each under its own error boundary (`apps/web/src/App.tsx`).
 | `/dashboard` | `apps/web/src/views/DashboardView.tsx` | CEFR ladder A2→C1 with "you are here"; estimated level + confidence; next-session plan (topic, primary/secondary target chips, reasoning) or an empty-plan card; skill mastery grouped by family with progress bar, trend, observation count; last-10-sessions table (date, topic, the six dimension scores with "not assessed" for an unmeasured one, overall, overall delta). |
 | `/review` | `apps/web/src/views/ReviewView.tsx` | Post-session review of the newest completed session: the six dimension scores ("not assessed" for an unmeasured one), strengths, up to three corrections (original → suggested + explanation), vocabulary to keep, and the next session's topic/targets/reason. Handles loading, no-session, still-analysing and failed-analysis states. |
 | `/review/:sessionId` | same | The same review for a named session, so it survives leaving the session screen. |
+| `/practice` | `apps/web/src/views/PracticeView.tsx` | One-time placement (three self-ratings), the objectives it seeds, and the recommended guided-speaking activity with its prompt, target skills and words. Empty state when there is no objective. |
 | `/settings` | `apps/web/src/views/SettingsView.tsx` | Correction style, session length, feedback language, preferred accent. Unset stays empty rather than showing a default the learner never chose. |
 | `/goals` | `apps/web/src/views/GoalsView.tsx` | List goals, add a goal (free-text `type` + description, priority forced to 0.5), mark active goal completed. |
 
@@ -126,6 +127,14 @@ All under `apps/api/src/routes/`. Any learner other than `learner-1` returns 404
 | POST | `/v1/sessions/:id/analyze` | Re-queues a failed analysis. Resets the existing job row (`UNIQUE(session_id,type)` makes a fresh insert impossible) or enqueues one when there is none. `409` for an already-analyzed session. Returns `{state:"QUEUED", sessionId}`. |
 | GET | `/v1/jobs/failed` | Failed jobs, newest first, each with its attempt history (`attempt`, `status`, `errorClass`, `error`, timestamps). |
 | GET | `/v1/sessions/:id/feedback` | Persisted post-session feedback: scores, `notAssessed` dimensions, strengths, stored corrections (with `learnerAction`), vocabulary, and the active plan's topic/targets/reason as `next`. A session that is not analysed yet answers `200` with `feedback: null` and its `state`; unknown session is `404`. |
+| GET | `/v1/learners/:id/objectives` | Objectives, highest priority first. |
+| POST | `/v1/learners/:id/objectives` | Requires `title` + `description`; status `active`. 201 `{id}`. |
+| GET | `/v1/learners/:id/activities/recommended` | The guided-speaking activity for the top objective, generated once per objective (asking twice returns the same row). No objective → `200` with `activity: null` and a reason. |
+| POST | `/v1/learners/:id/activities/:activityId/attempts` | Starts an attempt (`in_progress`). 201 `{attemptId}`. |
+| POST | `/v1/learners/:id/activity-attempts/:attemptId/submit` | Scores the attempt against the session's transcript + metrics. 409 on a repeat, 400 when the session is not this learner's. |
+| GET | `/v1/learners/:id/activity-attempts` | Attempt history with its stored result. |
+| POST | `/v1/learners/:id/diagnostic` | Three self-ratings → band, difficulty, low confidence, `basis: "self_report"`. Persists and seeds `estimatedLevel`; **never** writes skill mastery. 400 outside 0..1 / 0..7. |
+| GET | `/v1/learners/:id/diagnostic` | Latest placement, or `{diagnostic: null}`. |
 | GET | `/v1/learners/:id/errors` | Active recurring-error patterns with frequency, decayed `effectiveFrequency`, severity, confidence, first/last seen, a representative correction as `example`, and `trend` — `null` while fewer than two sessions carry evidence. |
 | GET | `/v1/learners/:id/review-queue` | Due vocabulary items (`?limit=`, max 50), soonest first, each with its prompt type — recognition, or production once recall exists. |
 | POST | `/v1/learners/:id/reviews/:word/attempts` | Records a review attempt (`outcome` required, optional `hintUsed`/`promptType`) and reschedules from it. Unknown word 404, bad outcome 400. |
@@ -208,6 +217,8 @@ Pure functions, no I/O — `packages/learning-engine/src/`, all exported from `i
 | `errors.ts` | `upsertErrorInput`, `effectiveFrequency`, `isRecurring`, `shouldRetire` | recurrence counting at confidence ≥ .8, exponential decay with a 30-day half-life, retirement at mastery ≥ .8 or effective frequency < 1 |
 | `difficulty.ts` | `adjustDifficulty`, `recentPerformance` | +.05 at ≥ .85, +.02 at ≥ .75, 0 at ≥ .55, else −.05; clamped .15–.95 |
 | `prioritization.ts` | `calculatePriority`, `rankCandidates`, `goalRelevanceFor`, `DEFAULT_NO_HISTORY` | six terms: recurrence .25, severity .20, goal relevance .20, communicative impact .15, readiness .10, forgetting risk .10 |
+| `activity.ts` | `assessGuidedSpeaking`, `selectObjective`, `GUIDED_RUBRIC_VERSION` | deterministic activity result: word coverage + speaking time scored, the target skill and pronunciation marked `not_assessed` with the reason spelled out |
+| `diagnostic.ts` | `runDiagnostic`, `DIAGNOSTIC_VERSION` | self-report placement: band, difficulty, confidence capped at 0.5, `basis: self_report`, frequency capped at a week of daily practice |
 | `review.ts` | `nextIntervalDays`, `applyReviewOutcome`, `dueAt`, `isDue`, `selectReviewQueue`, `SCHEDULER_VERSION` | documented interval policy — correct ×2.5, lapse back to 1 day, capped at 180; a hint counts as partial success; queue picks due items within a budget and alternates recognition with production |
 | `feedback.ts` | `deriveFeedback` | review shape from a stored analysis: unassessed dimensions, top-3 strengths by confidence, top-3 corrections by severity (a `suggested` sentence only when the wrong form actually occurs in the quoted evidence, else `null`), deduped vocabulary |
 | `planning.ts` | `selectTargets`, `chooseIntervention`, `estimateLevel` | drop mastery ≥ .8, take 2 primary + 1 secondary; intervention by family; CEFR banding A2/B1/B1+/B2+/C1 with confidence `clamp(.3 + .05·sessions, .3, .95)` |
@@ -284,8 +295,8 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 | Goal decomposition | **not implemented** | Goals are flat text rows. |
 | Dashboard recurring errors | **implemented** | `GET /v1/learners/:id/errors` + the Review page section; `trend` stays `null` under two sessions of evidence. |
 | Correction accept/dismiss | **partial** | `corrected_sentences.learner_action` exists and defaults to `pending`; no route or control changes it yet. |
-| Learning objectives / curriculum units / activity attempts | **not implemented** | Phase 2. No objectives, units or generic activity model exist; a session is still the only unit of work. |
-| Diagnostic onboarding | **not implemented** | Phase 2. There is no entry assessment; the level estimate is a by-product of completed sessions. |
+| Learning objectives / activity attempts | **partial** | Objectives, one activity type (`guided_speaking`) and attempts exist. No curriculum units, no sequencing, and no other activity type. |
+| Diagnostic onboarding | **partial** | A three-question self-report placement exists and is stored. It is not an assessment and does not touch skill mastery. Broader modalities (listening, reading, writing, dictation) are still absent. |
 | Level history / per-dimension trends | **not implemented** | `/progress` returns the last 10 sessions only. |
 | §25/§32 V2–V4 roadmap | **not implemented** | Personalized curriculum, teacher dashboard, advanced pronunciation. |
 | Redis / object storage / audio recordings / WebRTC | **out of scope by design** | Spec §1 non-goals. |
@@ -319,7 +330,7 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 
 ## 11. Tests
 
-`pnpm test` — 37 files, 224 tests, all passing (vitest). Includes an end-to-end pipeline test
+`pnpm test` — 39 files, 241 tests, all passing (vitest). Includes an end-to-end pipeline test
 (`apps/api/tests/e2e/pipeline.test.ts`) proving session → utterances → analysis → memory →
 plan → next-session targets, and a real-Python sidecar test.
 

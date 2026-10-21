@@ -6,3 +6,5 @@ export * from "./prioritization.js";
 export * from "./planning.js";
 export * from "./feedback.js";
 export * from "./review.js";
+export * from "./activity.js";
+export * from "./diagnostic.js";

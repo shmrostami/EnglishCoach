@@ -204,6 +204,68 @@ export const reviewAttempts = sqliteTable("review_attempts", {
   createdAt: integer("created_at").notNull(),
 });
 
+// Learning objectives (spec §6.2), separate from a session.
+export const learningObjectives = sqliteTable("learning_objectives", {
+  id: text("id").primaryKey(),
+  learnerId: text("learner_id").notNull().references(() => learners.id),
+  goalId: text("goal_id").references(() => goalsTable.id),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  skillCodes: text("skill_codes").notNull(),
+  successCriteria: text("success_criteria"),
+  priority: real("priority").notNull().default(0.5),
+  status: text("status").notNull().default("planned"),
+  dueAt: integer("due_at"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+// An exercise the learner can be asked to do (spec §6.3).
+export const activities = sqliteTable("activities", {
+  id: text("id").primaryKey(),
+  learnerId: text("learner_id").notNull().references(() => learners.id),
+  version: integer("version").notNull().default(1),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  objectiveIds: text("objective_ids").notNull(),
+  targetSkillCodes: text("target_skill_codes").notNull(),
+  difficulty: real("difficulty").notNull(),
+  estimatedMinutes: integer("estimated_minutes").notNull(),
+  inputModality: text("input_modality").notNull(),
+  outputModality: text("output_modality").notNull(),
+  rubricVersion: text("rubric_version"),
+  successCriteria: text("success_criteria"),
+  prompt: text("prompt"),
+  createdAt: integer("created_at").notNull(),
+});
+
+// One run through an activity (spec §6.3).
+export const activityAttempts = sqliteTable("activity_attempts", {
+  id: text("id").primaryKey(),
+  learnerId: text("learner_id").notNull().references(() => learners.id),
+  activityId: text("activity_id").notNull().references(() => activities.id),
+  activityVersion: integer("activity_version").notNull(),
+  sessionId: text("session_id").references(() => sessions.id),
+  status: text("status").notNull(),
+  startedAt: integer("started_at"),
+  completedAt: integer("completed_at"),
+  result: text("result"),
+  createdAt: integer("created_at").notNull(),
+});
+
+// Diagnostic onboarding (spec §5 Phase 2). `basis` is always 'self_report'.
+export const diagnostics = sqliteTable("diagnostics", {
+  id: text("id").primaryKey(),
+  learnerId: text("learner_id").notNull().references(() => learners.id),
+  band: text("band").notNull(),
+  confidence: real("confidence").notNull(),
+  difficulty: real("difficulty").notNull(),
+  focusSkills: text("focus_skills").notNull(),
+  basis: text("basis").notNull(),
+  rubricVersion: text("rubric_version").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
 export type SkillRow = typeof skills.$inferSelect;
 export type ErrorRow = typeof errorPatterns.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
@@ -217,3 +279,7 @@ export type JobAttemptRow = typeof jobAttempts.$inferSelect;
 export type CorrectedSentenceRow = typeof correctedSentences.$inferSelect;
 export type LearnerPreferenceRow = typeof learnerPreferences.$inferSelect;
 export type ReviewAttemptRow = typeof reviewAttempts.$inferSelect;
+export type ObjectiveRow = typeof learningObjectives.$inferSelect;
+export type ActivityRow = typeof activities.$inferSelect;
+export type ActivityAttemptRow = typeof activityAttempts.$inferSelect;
+export type DiagnosticRow = typeof diagnostics.$inferSelect;

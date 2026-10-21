@@ -303,6 +303,128 @@ describe("HTTP API", () => {
     expect((await app.inject({ method: "GET", url: "/v1/learners/nobody/preferences" })).statusCode).toBe(404);
   });
 
+  it("serves an objective, the recommended guided activity, and a deterministic attempt result", async () => {
+    const fresh = openDb(":memory:");
+    migrate(fresh);
+    ensureSeed(fresh);
+    const freshService = new SessionService(db(fresh));
+    const isolated = await buildApp({
+      service: freshService, db: db(fresh), registry: new BridgeRegistry(),
+      selectSpeech: () => new MockSpeechProvider({ turns: SCRIPT, autoClose: false }),
+      env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 60_000, OPENAI_API_KEY: undefined },
+      queue: () => {},
+    });
+
+    // Nothing set up yet: recommended activity is a valid empty state.
+    const empty = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/activities/recommended` });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json()).toMatchObject({ activity: null });
+
+    const obj = await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/objectives`,
+      payload: { title: "Talk about work decisions", description: "Past tense under pressure", skillCodes: ["grammar.past_tense"] },
+    });
+    expect(obj.statusCode).toBe(201);
+
+    const rec = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/activities/recommended` });
+    const recBody = rec.json() as { activity: { id: string; type: string; prompt: string; targetSkillCodes: string[] }; reason: string };
+    expect(recBody.activity.type).toBe("guided_speaking");
+    expect(recBody.activity.prompt).toContain("Talk about work decisions");
+    expect(recBody.activity.targetSkillCodes).toContain("grammar.past_tense");
+    expect(recBody.reason).toContain("Talk about work decisions");
+
+    // Asking twice returns the same activity, not a duplicate.
+    const again = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/activities/recommended` });
+    expect((again.json() as { activity: { id: string } }).activity.id).toBe(recBody.activity.id);
+
+    const started = await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/activities/${recBody.activity.id}/attempts`,
+    });
+    expect(started.statusCode).toBe(201);
+    const attemptId = (started.json() as { attemptId: string }).attemptId;
+
+    // A session with a transcript and metrics to score against.
+    const s = freshService.createSession(LEARNER_ID, Date.now());
+    freshService.recordUtterance(s.id, { speaker: "learner", text: "Yesterday I go to the budget meeting.", startedAt: 1, endedAt: 90_000 });
+    fresh.prepare("UPDATE sessions SET metrics=? WHERE id=?").run(JSON.stringify({
+      speakingSeconds: 90, userWordCount: 7, wordsPerMinute: 90, pauseCount: 1,
+      avgPauseMs: 200, longestPauseMs: 400, utteranceCount: 1, avgUtteranceWords: 7,
+    }), s.id);
+
+    const submitted = await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/activity-attempts/${attemptId}/submit`,
+      payload: { sessionId: s.id },
+    });
+    expect(submitted.statusCode).toBe(200);
+    const result = (submitted.json() as { result: { summary: string; dimensions: { skillCode: string; score: number | null; status: string }[] } }).result;
+    // Pronunciation is never scored by a text-only activity.
+    const pron = result.dimensions.find((d) => d.skillCode === "pronunciation.intelligibility")!;
+    expect(pron.status).toBe("not_assessed");
+    expect(pron.score).toBeNull();
+    expect(result.summary).toContain("pronunciation not assessed");
+
+    // Submitting twice is a conflict, not a second result.
+    const twice = await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/activity-attempts/${attemptId}/submit`,
+      payload: { sessionId: s.id },
+    });
+    expect(twice.statusCode).toBe(409);
+
+    // A session belonging to nobody is rejected rather than scored. Checked on
+    // a fresh attempt, because the completed one above short-circuits at 409.
+    const second = await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/activities/${recBody.activity.id}/attempts`,
+    });
+    const bad = await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/activity-attempts/${(second.json() as { attemptId: string }).attemptId}/submit`,
+      payload: { sessionId: "sess-nope" },
+    });
+    expect(bad.statusCode).toBe(400);
+
+    await isolated.close();
+  });
+
+  it("runs the diagnostic, labels it self-report, and rejects impossible answers", async () => {
+    const fresh = openDb(":memory:");
+    migrate(fresh);
+    ensureSeed(fresh);
+    const isolated = await buildApp({
+      service: new SessionService(db(fresh)), db: db(fresh), registry: new BridgeRegistry(),
+      selectSpeech: () => new MockSpeechProvider({ turns: SCRIPT, autoClose: false }),
+      env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 60_000, OPENAI_API_KEY: undefined },
+      queue: () => {},
+    });
+
+    const none = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/diagnostic` });
+    expect(none.statusCode).toBe(200);
+    expect(none.json()).toMatchObject({ diagnostic: null });
+
+    const ran = await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/diagnostic`,
+      payload: { speakingComfort: 0.7, grammarConfidence: 0.6, weeklySpeakingFrequency: 4, focusSkills: ["fluency.continuity"] },
+    });
+    expect(ran.statusCode).toBe(201);
+    const diag = ran.json() as { band: string; basis: string; confidence: number; rubricVersion: string };
+    // A placement from three self-ratings must not claim to be an assessment.
+    expect(diag.basis).toBe("self_report");
+    expect(diag.confidence).toBeLessThanOrEqual(0.5);
+    expect(diag.rubricVersion).toBe("onboarding-v1");
+
+    const stored = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/diagnostic` });
+    expect((stored.json() as { diagnostic: { band: string } }).diagnostic.band).toBe(diag.band);
+
+    expect((await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/diagnostic`,
+      payload: { speakingComfort: 2, grammarConfidence: 0.5, weeklySpeakingFrequency: 3 },
+    })).statusCode).toBe(400);
+    expect((await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/diagnostic`,
+      payload: { speakingComfort: 0.5, grammarConfidence: 0.5, weeklySpeakingFrequency: 9 },
+    })).statusCode).toBe(400);
+
+    await isolated.close();
+  });
+
   it("re-enqueues a failed analysis job and refuses an already-analyzed session", async () => {
     const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
     // A failed job row exists for this session (the runner exhausted its attempts).

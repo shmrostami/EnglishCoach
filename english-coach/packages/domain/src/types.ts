@@ -167,6 +167,62 @@ export interface ReviewItem {
   nextReviewAt: number | null;
 }
 
+export type ActivityType =
+  | "conversation" | "role_play" | "guided_speaking" | "vocabulary_review"
+  | "grammar" | "listening" | "reading" | "writing" | "dictation" | "pronunciation";
+
+export type ActivityStatus =
+  | "planned" | "ready" | "in_progress" | "submitted"
+  | "evaluating" | "completed" | "paused" | "abandoned" | "failed";
+
+/** What a learner is working toward (spec §6.2). Not a session. */
+export interface LearningObjective {
+  id: string;
+  goalId: string | null;
+  title: string;
+  description: string;
+  skillCodes: string[];
+  priority: number;
+  status: "planned" | "active" | "achieved" | "paused" | "cancelled";
+}
+
+/** An exercise with its target objective and success criteria (spec §6.3). */
+export interface Activity {
+  id: string;
+  version: number;
+  type: ActivityType;
+  title: string;
+  objectiveIds: string[];
+  targetSkillCodes: string[];
+  difficulty: number;
+  estimatedMinutes: number;
+  inputModality: string[];
+  outputModality: string[];
+  /** The prompt a guided-speaking activity asks for. */
+  prompt: string | null;
+  status: ActivityStatus;
+}
+
+/**
+ * Deterministic result of an activity. A dimension is only `assessed` when the
+ * activity actually measured it — a text exercise cannot assess pronunciation
+ * (spec §6.4, §12.1).
+ */
+export interface AssessmentDimension {
+  skillCode: string;
+  score: number | null;
+  status: "assessed" | "not_assessed" | "insufficient_evidence";
+  confidence: number;
+}
+
+export interface ActivityResult {
+  activityAttemptId: string;
+  rubricVersion: string;
+  dimensions: AssessmentDimension[];
+  /** Said in words so the learner reads the reason, not just a number. */
+  summary: string;
+}
+
 export interface PlanDraft {
   topic: string;
   candidateSkills: string[];

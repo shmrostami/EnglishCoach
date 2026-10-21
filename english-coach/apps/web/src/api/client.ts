@@ -102,6 +102,40 @@ export interface Preferences {
   updatedAt: number | null;
 }
 
+export interface Objective {
+  id: string;
+  goalId: string | null;
+  title: string;
+  description: string;
+  skillCodes: string[];
+  priority: number;
+  status: string;
+}
+
+export interface Activity {
+  id: string;
+  version: number;
+  type: string;
+  title: string;
+  objectiveIds: string[];
+  targetSkillCodes: string[];
+  difficulty: number;
+  estimatedMinutes: number;
+  prompt: string | null;
+  targetWords: string[];
+  rubricVersion: string | null;
+  status: string;
+}
+
+export interface DiagnosticResult {
+  band: string;
+  confidence: number;
+  difficulty: number;
+  focusSkills: string[];
+  basis: string;
+  rubricVersion: string;
+}
+
 export const api = {
   createSession: () => http<{ sessionId: string; topic: string; difficulty: number; state: string }>(
     `/v1/learners/${LEARNER_ID}/sessions`, { method: "POST" }),
@@ -130,6 +164,21 @@ export const api = {
     http<{ word: string; intervalDays: number; nextReviewAt: number; schedulerVersion: string }>(
       `/v1/learners/${LEARNER_ID}/reviews/${encodeURIComponent(word)}/attempts`,
       { method: "POST", body: JSON.stringify(body) }),
+  objectives: () => http<Objective[]>(`/v1/learners/${LEARNER_ID}/objectives`),
+  addObjective: (o: { title: string; description: string; skillCodes?: string[]; priority?: number }) =>
+    http<{ id: string }>(`/v1/learners/${LEARNER_ID}/objectives`, { method: "POST", body: JSON.stringify(o) }),
+  recommendedActivity: () =>
+    http<{ activity: Activity | null; reason: string }>(`/v1/learners/${LEARNER_ID}/activities/recommended`),
+  startAttempt: (activityId: string) =>
+    http<{ attemptId: string; status: string }>(
+      `/v1/learners/${LEARNER_ID}/activities/${activityId}/attempts`, { method: "POST" }),
+  submitAttempt: (attemptId: string, sessionId: string) =>
+    http<{ attemptId: string; status: string; result: { summary: string; dimensions: { skillCode: string; score: number | null; status: string }[] } }>(
+      `/v1/learners/${LEARNER_ID}/activity-attempts/${attemptId}/submit`,
+      { method: "POST", body: JSON.stringify({ sessionId }) }),
+  diagnostic: () => http<{ diagnostic: DiagnosticResult | null }>(`/v1/learners/${LEARNER_ID}/diagnostic`),
+  runDiagnostic: (a: { speakingComfort: number; grammarConfidence: number; weeklySpeakingFrequency: number; focusSkills: string[] }) =>
+    http<DiagnosticResult>(`/v1/learners/${LEARNER_ID}/diagnostic`, { method: "POST", body: JSON.stringify(a) }),
   preferences: () => http<Preferences>(`/v1/learners/${LEARNER_ID}/preferences`),
   savePreferences: (patch: Partial<Preferences>) =>
     http<{ ok: boolean }>(`/v1/learners/${LEARNER_ID}/preferences`, { method: "PATCH", body: JSON.stringify(patch) }),
