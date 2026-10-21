@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import {
   learners, errorPatterns, correctedSentences, vocabularyItems, reviewAttempts,
-  learnerPreferences, sessions, type DrizzleDb,
+  learnerPreferences, sessions, vocabularyItemsCanonical, vocabularyState,
+  difficultyProfiles, type DrizzleDb,
 } from "@ec/db";
 import type { ErrorPatternView } from "@ec/domain";
 import {
@@ -127,6 +128,61 @@ export function registerLearningRoutes(app: FastifyInstance, d: DrizzleDb): void
       };
     });
     return { patterns: views, generatedAt: now };
+  });
+
+  /**
+   * The learner's vocabulary: canonical items and their state for this
+   * learner (spec §6.5). The three masteries are reported separately — a
+   * word the learner recognises but has never used is not "known".
+   */
+  app.get("/v1/learners/:id/vocabulary", (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!hasLearner(d, id)) return reply.code(404).send({ error: "unknown learner" });
+    const rows = d.select().from(vocabularyState)
+      .where(eq(vocabularyState.learnerId, id)).all();
+    const items = d.select().from(vocabularyItemsCanonical).all();
+    const byId = new Map(items.map((i) => [i.id, i]));
+    return rows
+      .map((r) => {
+        const item = byId.get(r.vocabularyItemId);
+        return {
+          lemma: item?.lemma ?? null,
+          senseKey: item?.senseKey ?? null,
+          partOfSpeech: item?.partOfSpeech ?? null,
+          definition: item?.definition ?? null,
+          recognitionMastery: r.recognitionMastery,
+          recallMastery: r.recallMastery,
+          productionMastery: r.productionMastery,
+          stability: r.stability,
+          difficulty: r.difficulty,
+          dueAt: r.dueAt,
+          lastReviewedAt: r.lastReviewedAt,
+          reviewCount: r.reviewCount,
+          lapseCount: r.lapseCount,
+          status: r.status,
+        };
+      })
+      .sort((a, b) => a.productionMastery - b.productionMastery);
+  });
+
+  /** The six-part difficulty profile of a session (design.md §10). */
+  app.get("/v1/sessions/:id/difficulty", (req, reply) => {
+    const { id } = req.params as { id: string };
+    const row = d.select().from(difficultyProfiles)
+      .where(eq(difficultyProfiles.sessionId, id)).all()[0];
+    // No profile is a valid state: the session has not been analysed yet.
+    if (!row) return reply.send({ difficulty: null });
+    return {
+      difficulty: {
+        vocabularyComplexity: row.vocabularyComplexity,
+        grammaticalComplexity: row.grammaticalComplexity,
+        speechSpeed: row.speechSpeed,
+        abstraction: row.abstraction,
+        interactionPressure: row.interactionPressure,
+        topicFamiliarity: row.topicFamiliarity,
+        composite: row.composite,
+      },
+    };
   });
 
   /** What is due now, within a review-time budget (spec §7.4). */

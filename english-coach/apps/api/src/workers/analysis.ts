@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne, inArray } from "drizzle-orm";
 import {
   sessions, utterances, observations, skills, errorPatterns, vocabularyItems,
-  learners, jobs, correctedSentences, tryParseJson, type DrizzleDb,
+  learners, jobs, correctedSentences, vocabularyItemsCanonical, vocabularyState,
+  difficultyProfiles, interventions, tryParseJson, type DrizzleDb,
 } from "@ec/db";
 import type { Scores, SessionAnalysis, SessionMetrics, Observation, SkillState } from "@ec/domain";
 import { SessionAnalysisSchema } from "@ec/domain";
@@ -10,6 +11,8 @@ import type { AnalysisProvider, TranscriptTurn } from "@ec/openai";
 import {
   calculateOverall, updateSkill, trendFromDelta,
   upsertErrorInput, shouldRetire, estimateLevel, deriveFeedback,
+  lemmaCandidates, applyVocabEvidence, INITIAL_VOCAB_STATE, type VocabState,
+  decomposeDifficulty,
   type ErrorPatternInput,
 } from "@ec/learning-engine";
 import { buildLearnerContext } from "./context.js";
@@ -75,7 +78,11 @@ export async function runAnalysis(opts: {
   // mid-run retry a no-op)
   applyMemory(d, session.learnerId, sessionId, stored, overall, now);
 
-  // 4) persist the reviewable corrections (spec §11.3). Derived from the
+  // 4) persist the difficulty profile (design.md §10) so the composite the
+  // planner used can be explained component by component.
+  persistDifficultyProfile(d, sessionId, session.learnerId, turns, metrics, now);
+
+  // 5) persist the reviewable corrections (spec §11.3). Derived from the
   // stored analysis, so a retry writes the same rows; the `any existing` guard
   // means a re-run cannot duplicate them (spec §3 principle 6). Written before
   // the session row is marked analysed: a crash in between must not leave a
@@ -121,7 +128,7 @@ export async function runAnalysis(opts: {
     }).run();
   }
 
-  // 5) queue the planner
+  // 6) queue the planner
   try {
     d.insert(jobs).values({
       id: `job-${randomUUID()}`,
@@ -133,6 +140,152 @@ export async function runAnalysis(opts: {
       createdAt: now,
     }).run();
   } catch { /* duplicate no-op */ }
+}
+
+/**
+ * Records a produced word against its canonical item and the learner's state
+ * of it. Idempotent per session: the state moves once per session, so a
+ * re-run of the analysis does not inflate mastery.
+ */
+/**
+ * Computes and stores the session's six-part difficulty profile.
+ *
+ * Familiarity is measured against the words the learner used in EARLIER
+ * sessions, so a topic they have spoken about before scores as less demanding
+ * than a new one. One profile per session (UNIQUE session_id), so a re-run
+ * overwrites rather than stacks.
+ */
+function persistDifficultyProfile(
+  d: DrizzleDb,
+  sessionId: string,
+  learnerId: string,
+  turns: TranscriptTurn[],
+  metrics: SessionMetrics,
+  now: number,
+): void {
+  const learnerTurns = turns.filter((t) => t.speaker === "learner").map((t) => t.text);
+  const coachTurns = turns.filter((t) => t.speaker === "coach").map((t) => t.text);
+  const interventionCount = d.select().from(interventions).where(eq(interventions.sessionId, sessionId)).all().length;
+
+  // Words used in earlier sessions — this session's own words do not count.
+  const earlier = d.select().from(utterances)
+    .where(and(eq(utterances.speaker, "learner"), ne(utterances.sessionId, sessionId))).all()
+    .filter((u) => {
+      const s = d.select().from(sessions).where(eq(sessions.id, u.sessionId)).all()[0];
+      return s?.learnerId === learnerId;
+    });
+  const familiarWords = new Set<string>();
+  for (const u of earlier) {
+    for (const w of u.text.toLowerCase().match(/[a-z']+/g) ?? []) familiarWords.add(w);
+  }
+
+  const profile = decomposeDifficulty({
+    learnerTurns, coachTurns, metrics, interventions: interventionCount, familiarWords,
+  });
+
+  const existing = d.select().from(difficultyProfiles)
+    .where(eq(difficultyProfiles.sessionId, sessionId)).all()[0];
+  if (existing) {
+    d.update(difficultyProfiles).set({
+      vocabularyComplexity: profile.vocabularyComplexity,
+      grammaticalComplexity: profile.grammaticalComplexity,
+      speechSpeed: profile.speechSpeed,
+      abstraction: profile.abstraction,
+      interactionPressure: profile.interactionPressure,
+      topicFamiliarity: profile.topicFamiliarity,
+      composite: profile.composite,
+    }).where(eq(difficultyProfiles.id, existing.id)).run();
+    return;
+  }
+  d.insert(difficultyProfiles).values({
+    id: `diff-${randomUUID()}`,
+    sessionId,
+    vocabularyComplexity: profile.vocabularyComplexity,
+    grammaticalComplexity: profile.grammaticalComplexity,
+    speechSpeed: profile.speechSpeed,
+    abstraction: profile.abstraction,
+    interactionPressure: profile.interactionPressure,
+    topicFamiliarity: profile.topicFamiliarity,
+    composite: profile.composite,
+    createdAt: now,
+  }).run();
+}
+
+function trackCanonicalVocabulary(d: DrizzleDb, learnerId: string, word: string, now: number): void {
+  // Resolve against what already exists: "negotiated" and "negotiate" must
+  // land on the same canonical item, and the lemma candidates are how that
+  // is decided without a rule that could merge two different words.
+  const candidates = lemmaCandidates(word);
+  if (candidates.length === 0) return;
+  const existing = d.select().from(vocabularyItemsCanonical)
+    .where(and(
+      eq(vocabularyItemsCanonical.senseKey, "default"),
+      inArray(vocabularyItemsCanonical.lemma, candidates),
+    )).all();
+  const canonical = existing.sort((a, b) => candidates.indexOf(a.lemma) - candidates.indexOf(b.lemma))[0];
+  const lemma = canonical?.lemma ?? candidates[0];
+
+  // The sense key is "default" because nothing in the pipeline distinguishes
+  // senses yet. It is a column, not a convention, so a second sense can be
+  // added later without merging it into this one (spec §6.5).
+  const itemId = canonical?.id ?? `voc-${randomUUID()}`;
+  if (!canonical) {
+    d.insert(vocabularyItemsCanonical).values({
+      id: itemId, lemma, senseKey: "default",
+      partOfSpeech: null, definition: null,
+      exampleSentences: null, collocations: null, register: null, topicTags: null,
+      createdAt: now,
+    }).run();
+  }
+
+  const stateRow = d.select().from(vocabularyState)
+    .where(and(
+      eq(vocabularyState.learnerId, learnerId),
+      eq(vocabularyState.vocabularyItemId, itemId),
+    )).all()[0];
+  const prev = stateRow
+    ? {
+        recognitionMastery: stateRow.recognitionMastery,
+        recallMastery: stateRow.recallMastery,
+        productionMastery: stateRow.productionMastery,
+        stability: stateRow.stability,
+        difficulty: stateRow.difficulty,
+        reviewCount: stateRow.reviewCount,
+        lapseCount: stateRow.lapseCount,
+        status: stateRow.status as VocabState["status"],
+      }
+    : INITIAL_VOCAB_STATE;
+  const next = applyVocabEvidence(prev, { produced: true, recognised: true, recalled: true });
+
+  if (stateRow) {
+    d.update(vocabularyState).set({
+      recognitionMastery: next.recognitionMastery,
+      recallMastery: next.recallMastery,
+      productionMastery: next.productionMastery,
+      stability: next.stability,
+      difficulty: next.difficulty,
+      reviewCount: next.reviewCount,
+      lapseCount: next.lapseCount,
+      status: next.status,
+      lastReviewedAt: now,
+    }).where(eq(vocabularyState.id, stateRow.id)).run();
+  } else {
+    d.insert(vocabularyState).values({
+      id: `vstate-${randomUUID()}`,
+      learnerId, vocabularyItemId: itemId,
+      recognitionMastery: next.recognitionMastery,
+      recallMastery: next.recallMastery,
+      productionMastery: next.productionMastery,
+      stability: next.stability,
+      difficulty: next.difficulty,
+      reviewCount: next.reviewCount,
+      lapseCount: next.lapseCount,
+      lastRecallRating: null,
+      status: next.status,
+      lastReviewedAt: now,
+      createdAt: now,
+    }).run();
+  }
 }
 
 function persistCorrections(d: DrizzleDb, sessionId: string, analysis: SessionAnalysis, now: number): void {
@@ -275,10 +428,17 @@ function applyMemory(
     }
   }
 
-  // Vocabulary: track words from vocabulary_use evidence (longest alpha token), spec §10.4
+  // Vocabulary: canonical item + per-learner state (spec §6.5).
+  //
+  // The canonical item is shared and keyed by (lemma, sense) so a polysemous
+  // word keeps its meanings apart; the learner state tracks recognition,
+  // recall and production separately, because knowing a word and using it are
+  // different skills. The legacy `vocabulary_items` row is still written so
+  // the existing review queue keeps working.
   for (const o of analysis.observations.filter((x) => x.type === "vocabulary_use")) {
     const word = (o.evidence.match(/[a-zA-Z]{4,}/g) ?? []).sort((a, b) => b.length - a.length)[0];
     if (!word) continue;
+    trackCanonicalVocabulary(d, learnerId, word, now);
     const existing = d.select().from(vocabularyItems)
       .where(and(eq(vocabularyItems.learnerId, learnerId), eq(vocabularyItems.word, word))).all()[0];
     if (existing) {

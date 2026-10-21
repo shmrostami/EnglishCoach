@@ -295,3 +295,60 @@ CREATE TABLE goal_milestones (
   achieved_at INTEGER,
   created_at INTEGER NOT NULL
 );
+
+-- Canonical vocabulary item (spec §6.5): the language item itself, separate
+-- from any one learner's state of it. `lemma` is the normalized identity;
+-- distinct meanings of a polysemous word are separate rows with separate
+-- `sense` keys, never merged.
+CREATE TABLE vocabulary_items_canonical (
+  id TEXT PRIMARY KEY,
+  lemma TEXT NOT NULL,
+  sense_key TEXT NOT NULL,
+  part_of_speech TEXT,
+  definition TEXT,
+  example_sentences TEXT,
+  collocations TEXT,
+  register TEXT,
+  topic_tags TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE (lemma, sense_key)
+);
+
+-- Per-learner state of a canonical item (spec §6.5): recognition, recall and
+-- production are tracked separately, because knowing a word and using it are
+-- different skills.
+CREATE TABLE vocabulary_state (
+  id TEXT PRIMARY KEY,
+  learner_id TEXT NOT NULL REFERENCES learners(id),
+  vocabulary_item_id TEXT NOT NULL REFERENCES vocabulary_items_canonical(id),
+  recognition_mastery REAL NOT NULL DEFAULT 0,
+  recall_mastery REAL NOT NULL DEFAULT 0,
+  production_mastery REAL NOT NULL DEFAULT 0,
+  stability REAL NOT NULL DEFAULT 0,
+  difficulty REAL NOT NULL DEFAULT 0.5,
+  due_at INTEGER,
+  last_reviewed_at INTEGER,
+  review_count INTEGER NOT NULL DEFAULT 0,
+  lapse_count INTEGER NOT NULL DEFAULT 0,
+  last_recall_rating TEXT,
+  status TEXT NOT NULL DEFAULT 'learning',
+  created_at INTEGER NOT NULL,
+  UNIQUE (learner_id, vocabulary_item_id)
+);
+
+-- The six-part difficulty profile for a session (design.md §10). Stored so the
+-- composite the planner used can be explained afterwards, component by
+-- component, instead of being a bare number.
+CREATE TABLE difficulty_profiles (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  vocabulary_complexity REAL NOT NULL,
+  grammatical_complexity REAL NOT NULL,
+  speech_speed REAL NOT NULL,
+  abstraction REAL NOT NULL,
+  interaction_pressure REAL NOT NULL,
+  topic_familiarity REAL NOT NULL,
+  composite REAL NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (session_id)
+);

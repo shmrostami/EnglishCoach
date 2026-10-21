@@ -281,6 +281,55 @@ export const goalMilestones = sqliteTable("goal_milestones", {
   createdAt: integer("created_at").notNull(),
 });
 
+// The canonical language item (spec §6.5) — the word itself, not any one
+// learner's state of it. `senseKey` keeps polysemous words apart.
+export const vocabularyItemsCanonical = sqliteTable("vocabulary_items_canonical", {
+  id: text("id").primaryKey(),
+  lemma: text("lemma").notNull(),
+  senseKey: text("sense_key").notNull(),
+  partOfSpeech: text("part_of_speech"),
+  definition: text("definition"),
+  exampleSentences: text("example_sentences"),
+  collocations: text("collocations"),
+  register: text("register"),
+  topicTags: text("topic_tags"),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ uq_vocab_canonical: unique().on(t.lemma, t.senseKey) }));
+
+// A learner's state of a canonical item: recognition, recall and production
+// move independently (spec §6.5).
+export const vocabularyState = sqliteTable("vocabulary_state", {
+  id: text("id").primaryKey(),
+  learnerId: text("learner_id").notNull().references(() => learners.id),
+  vocabularyItemId: text("vocabulary_item_id").notNull().references(() => vocabularyItemsCanonical.id),
+  recognitionMastery: real("recognition_mastery").notNull().default(0),
+  recallMastery: real("recall_mastery").notNull().default(0),
+  productionMastery: real("production_mastery").notNull().default(0),
+  stability: real("stability").notNull().default(0),
+  difficulty: real("difficulty").notNull().default(0.5),
+  dueAt: integer("due_at"),
+  lastReviewedAt: integer("last_reviewed_at"),
+  reviewCount: integer("review_count").notNull().default(0),
+  lapseCount: integer("lapse_count").notNull().default(0),
+  lastRecallRating: text("last_recall_rating"),
+  status: text("status").notNull().default("learning"),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ uq_vocab_state: unique().on(t.learnerId, t.vocabularyItemId) }));
+
+// The six-part difficulty profile of one session (design.md §10).
+export const difficultyProfiles = sqliteTable("difficulty_profiles", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => sessions.id),
+  vocabularyComplexity: real("vocabulary_complexity").notNull(),
+  grammaticalComplexity: real("grammatical_complexity").notNull(),
+  speechSpeed: real("speech_speed").notNull(),
+  abstraction: real("abstraction").notNull(),
+  interactionPressure: real("interaction_pressure").notNull(),
+  topicFamiliarity: real("topic_familiarity").notNull(),
+  composite: real("composite").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ uq_difficulty_session: unique().on(t.sessionId) }));
+
 export type SkillRow = typeof skills.$inferSelect;
 export type ErrorRow = typeof errorPatterns.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
@@ -299,3 +348,6 @@ export type ActivityRow = typeof activities.$inferSelect;
 export type ActivityAttemptRow = typeof activityAttempts.$inferSelect;
 export type DiagnosticRow = typeof diagnostics.$inferSelect;
 export type MilestoneRow = typeof goalMilestones.$inferSelect;
+export type CanonicalVocabRow = typeof vocabularyItemsCanonical.$inferSelect;
+export type VocabStateRow = typeof vocabularyState.$inferSelect;
+export type DifficultyProfileRow = typeof difficultyProfiles.$inferSelect;

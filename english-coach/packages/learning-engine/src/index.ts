@@ -9,3 +9,5 @@ export * from "./review.js";
 export * from "./activity.js";
 export * from "./diagnostic.js";
 export * from "./goals.js";
+export * from "./vocabulary.js";
+export * from "./difficulty-decomposition.js";

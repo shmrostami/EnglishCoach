@@ -6,7 +6,8 @@ import { openDb, db, migrate, ensureSeed } from "@ec/db";
 import { SessionService } from "../src/services/session.js";
 import { BridgeRegistry, RealtimeBridge } from "../src/realtime/bridge.js";
 import { JobRunner } from "../src/workers/jobs.js";
-import { MockSpeechProvider, type MockTurn, selectSpeechProvider, MOCK_DEMO_SCRIPT } from "@ec/openai";
+import { MockSpeechProvider, MockAnalysisProvider, type MockTurn, selectSpeechProvider, MOCK_DEMO_SCRIPT } from "@ec/openai";
+import { runAnalysis } from "../src/workers/analysis.js";
 import { LEARNER_ID } from "@ec/domain";
 
 const SCRIPT: MockTurn[] = [
@@ -502,6 +503,80 @@ describe("HTTP API", () => {
       method: "POST", url: `/v1/learners/${LEARNER_ID}/goals/goal-2/milestones`,
       payload: { title: "bad", targetMastery: 5 },
     })).statusCode).toBe(400);
+    await isolated.close();
+  });
+
+  it("records canonical vocabulary with separate recognition, recall and production", async () => {
+    const fresh = openDb(":memory:");
+    migrate(fresh);
+    ensureSeed(fresh);
+    const isolated = await buildApp({
+      service: new SessionService(db(fresh)), db: db(fresh), registry: new BridgeRegistry(),
+      selectSpeech: () => new MockSpeechProvider({ turns: SCRIPT, autoClose: false }),
+      env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 60_000, OPENAI_API_KEY: undefined },
+      queue: () => {},
+    });
+    // Two surface forms of one word must land on ONE canonical item.
+    fresh.prepare(
+      "INSERT INTO vocabulary_items_canonical (id, lemma, sense_key, created_at) VALUES (?,?,?,?)",
+    ).run("canon-1", "negotiate", "default", Date.now());
+    fresh.prepare(
+      "INSERT INTO vocabulary_state (id, learner_id, vocabulary_item_id, recognition_mastery, recall_mastery, production_mastery, stability, difficulty, review_count, lapse_count, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+    ).run("vs-1", LEARNER_ID, "canon-1", 0.3, 0.2, 0.1, 0.1, 0.5, 1, 0, "learning", Date.now());
+
+    const res = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/vocabulary` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      lemma: string; recognitionMastery: number; recallMastery: number; productionMastery: number; status: string;
+    }[];
+    expect(body[0].lemma).toBe("negotiate");
+    // The three masteries are reported separately, not collapsed into one.
+    expect(body[0].recognitionMastery).toBe(0.3);
+    expect(body[0].recallMastery).toBe(0.2);
+    expect(body[0].productionMastery).toBe(0.1);
+    expect(body[0].status).toBe("learning");
+
+    expect((await isolated.inject({ method: "GET", url: "/v1/learners/nobody/vocabulary" })).statusCode).toBe(404);
+    await isolated.close();
+  });
+
+  it("stores a six-part difficulty profile for an analysed session", async () => {
+    const fresh = openDb(":memory:");
+    migrate(fresh);
+    ensureSeed(fresh);
+    const svc = new SessionService(db(fresh));
+    const isolated = await buildApp({
+      service: svc, db: db(fresh), registry: new BridgeRegistry(),
+      selectSpeech: () => new MockSpeechProvider({ turns: SCRIPT, autoClose: false }),
+      env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 60_000, OPENAI_API_KEY: undefined },
+      queue: () => {},
+    });
+
+    // Before analysis there is no profile — a valid state, not an error.
+    const sess = svc.createSession(LEARNER_ID, Date.now());
+    const before = await isolated.inject({ method: "GET", url: `/v1/sessions/${sess.id}/difficulty` });
+    expect(before.statusCode).toBe(200);
+    expect(before.json()).toMatchObject({ difficulty: null });
+
+    svc.recordUtterance(sess.id, { speaker: "learner", text: "Yesterday I go to work.", startedAt: 0, endedAt: 1000 });
+    svc.recordUtterance(sess.id, { speaker: "coach", text: "Tell me more.", startedAt: 1000, endedAt: 2000 });
+    fresh.prepare("UPDATE sessions SET metrics=? WHERE id=?").run(JSON.stringify({
+      speakingSeconds: 20, userWordCount: 20, wordsPerMinute: 60, pauseCount: 1,
+      avgPauseMs: 300, longestPauseMs: 500, utteranceCount: 2, avgUtteranceWords: 10,
+    }), sess.id);
+
+    await runAnalysis({
+      db: db(fresh), provider: new MockAnalysisProvider(), sessionId: sess.id, now: Date.now(),
+    });
+
+    const res = await isolated.inject({ method: "GET", url: `/v1/sessions/${sess.id}/difficulty` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { difficulty: Record<string, number> };
+    for (const key of ["vocabularyComplexity", "grammaticalComplexity", "speechSpeed",
+      "abstraction", "interactionPressure", "topicFamiliarity", "composite"]) {
+      expect(body.difficulty[key]).toBeGreaterThanOrEqual(0);
+      expect(body.difficulty[key]).toBeLessThanOrEqual(1);
+    }
     await isolated.close();
   });
 
