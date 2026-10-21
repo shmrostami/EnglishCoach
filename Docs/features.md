@@ -254,6 +254,19 @@ AnalysisProvider { capabilities: ProviderCapabilities, analyze, plan }
 ProviderCapabilities { pronunciationEvidence: boolean }
 ```
 
+`LocalAnalysisProvider` (`packages/openai/src/local/analysis.ts`) is what `PROVIDER=local`
+scores with. Before it, local mode used the mock lexicon: three hardcoded regexes
+and fixed numbers, so a learner's scores had no relationship to what they said.
+It calls the same OpenAI-compatible endpoint as the conversation (Ollama by
+default) and adds four guards, each of which the model alone does not provide:
+
+| Guard | What it stops |
+|---|---|
+| `pronunciation: null` | A text model returning a pronunciation number (§12.1) |
+| `evidenceIsGrounded` | An observation whose quote is not in the learner's own speech (§8) |
+| `repairAnalysis` | A pipe-separated enum copied from the prompt, numeric strings, an unknown skill code (dropped), a self-reported confidence of `1.0` (capped at 0.95) |
+| `parseJsonLoose` + salvage | A reply truncated mid-object because a 3B model ran out of tokens |
+
 | Capability | `mock` (default) | `openai` | `local` |
 |---|---|---|---|
 | Learner audio in | ignored (scripted) | OpenAI Realtime | endpoint gate → faster-whisper |
@@ -261,7 +274,7 @@ ProviderCapabilities { pronunciationEvidence: boolean }
 | Coach transcript | scripted | Realtime transcript | local chat LLM |
 | Coach audio | 40 ms silent frames | Realtime 24 kHz | Piper 22050 / Kokoro 24000 |
 | Tool calls | script-injected | **yes** (2 functions) | **none** |
-| Analysis + planning | mock lexicon | real LLM | **mock lexicon** |
+| Analysis + planning | mock lexicon | real LLM | **real LLM** (same local endpoint as the conversation) |
 | Failure reasons | script finished | `connection_lost_<code>` | `stt_unavailable`, `voice_engine_lost`, `coach_unavailable` |
 
 Local-mode pieces:
@@ -325,6 +338,7 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 **Defects**
 
 - `openai` mode emits zero-duration turns, so WPM reads 0.
+- `local` mode's analysis takes 40-70 s on CPU for a short session (llama3.2:3b), so the review page shows "still being analysed" for a minute. The job runner waits for it and retries up to 3 times.
 - `recordUtterance` finds the previous learner turn by speaker now (the odd/even-sequence
   assumption is gone), but `pauseBeforeMs` is still only used for the per-turn pause metric.
 - The web client's reconnect uses a fixed backoff schedule; a session that is gone from the
@@ -335,7 +349,7 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 
 ## 11. Tests
 
-`pnpm test` — 39 files, 251 tests, all passing (vitest). Includes an end-to-end pipeline test
+`pnpm test` — 40 files, 272 tests, all passing (vitest). Includes an end-to-end pipeline test
 (`apps/api/tests/e2e/pipeline.test.ts`) proving session → utterances → analysis → memory →
 plan → next-session targets, and a real-Python sidecar test.
 

@@ -332,7 +332,7 @@
     <div class="stat"><b>10</b><span>session states</span></div>
     <div class="stat"><b>20</b><span>skill codes</span></div>
     <div class="stat"><b>3</b><span>provider modes</span></div>
-    <div class="stat"><b>251</b><span>tests, 39 files</span></div>
+    <div class="stat"><b>272</b><span>tests, 40 files</span></div>
   </div>
 
   <section>
@@ -533,7 +533,7 @@
         </dl>
       </div>
     </div>
-    <p class="note" style="margin-top:14px">Local mode talks, but every post-session number it produces is still the mock lexicon's. The README says so; it is easy to miss in the UI.</p>
+    <p class="note" style="margin-top:14px">Local mode now scores with the same local model that holds the conversation. Four guards sit between the model and the learner model: pronunciation is forced to null, evidence must be grounded in the learner's own words, malformed enum/skill/confidence values are repaired or dropped, and a truncated reply is salvaged.</p>
   </section>
 
   <section>

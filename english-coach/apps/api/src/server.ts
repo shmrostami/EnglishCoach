@@ -19,7 +19,15 @@ async function main() {
   const service = new SessionService(d);
   const registry = new BridgeRegistry();
   const speechProviders = new Map<string, SpeechConversationProvider>();
-  const speechAnalysis = selectAnalysisProvider({ PROVIDER: env.PROVIDER, OPENAI_API_KEY: env.OPENAI_API_KEY });
+  // The analysis provider gets the same local endpoint as the conversation:
+  // with PROVIDER=local it calls the learner's own model, not the mock lexicon.
+  const speechAnalysis = selectAnalysisProvider({
+    PROVIDER: env.PROVIDER,
+    OPENAI_API_KEY: env.OPENAI_API_KEY,
+    LLM_BASE_URL: env.LLM_BASE_URL,
+    LLM_MODEL: env.LLM_MODEL,
+    LLM_API_KEY: env.LLM_API_KEY,
+  });
   const runner = new JobRunner({
     db: d,
     handle: async (job) => {
