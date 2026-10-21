@@ -136,6 +136,24 @@ export interface DiagnosticResult {
   rubricVersion: string;
 }
 
+export interface LevelHistory {
+  sessions: number;
+  history: { sessionId: string; startedAt: number; overall: number | null }[];
+  trends: Record<string, "improving" | "stable" | "declining" | null>;
+  levels: { sessionId: string; startedAt: number; level: string; confidence: number }[];
+}
+
+export interface Milestone {
+  id: string;
+  title: string;
+  description: string | null;
+  targetSkillCode: string | null;
+  targetMastery: number | null;
+  status: string;
+  dueAt: number | null;
+  achievedAt: number | null;
+}
+
 export const api = {
   createSession: () => http<{ sessionId: string; topic: string; difficulty: number; state: string }>(
     `/v1/learners/${LEARNER_ID}/sessions`, { method: "POST" }),
@@ -146,12 +164,23 @@ export const api = {
   endSession: (id: string) => http<{ state: string }>(`/v1/sessions/${id}/end`, { method: "POST" }),
   retryAnalysis: (id: string) => http<{ state: string; sessionId: string }>(`/v1/sessions/${id}/analyze`, { method: "POST" }),
   feedback: (id: string) => http<FeedbackResponse>(`/v1/sessions/${id}/feedback`),
+  setCorrectionAction: (sessionId: string, correctionId: string, learnerAction: "accepted" | "dismissed") =>
+    http<{ correctionId: string; learnerAction: string }>(
+      `/v1/sessions/${sessionId}/corrections/${correctionId}`,
+      { method: "PATCH", body: JSON.stringify({ learnerAction }) }),
   profile: () => http<Record<string, unknown>>(`/v1/learners/${LEARNER_ID}`),
   skills: () => http<Array<Record<string, unknown>>>(`/v1/learners/${LEARNER_ID}/skills`),
   // No active plan is a valid empty state: the server answers 200 with a JSON
   // `null` body, so this resolves to null rather than throwing.
   plan: () => http<Plan | null>(`/v1/learners/${LEARNER_ID}/learning-plan`),
   progress: () => http<Array<Record<string, unknown>>>(`/v1/learners/${LEARNER_ID}/progress`),
+  levelHistory: () => http<LevelHistory>(`/v1/learners/${LEARNER_ID}/level-history`),
+  milestones: (goalId: string) =>
+    http<{ milestones: Milestone[]; suggested: { title: string; targetSkillCode: string; targetMastery: number }[] }>(
+      `/v1/learners/${LEARNER_ID}/goals/${goalId}/milestones`),
+  addMilestone: (goalId: string, m: { title: string; targetSkillCode?: string; targetMastery?: number }) =>
+    http<{ id: string }>(`/v1/learners/${LEARNER_ID}/goals/${goalId}/milestones`,
+      { method: "POST", body: JSON.stringify(m) }),
   goals: () => http<Array<Record<string, unknown>>>(`/v1/learners/${LEARNER_ID}/goals`),
   addGoal: (g: { type: string; description: string; priority?: number }) =>
     http<{ id: string }>(`/v1/learners/${LEARNER_ID}/goals`, { method: "POST", body: JSON.stringify(g) }),

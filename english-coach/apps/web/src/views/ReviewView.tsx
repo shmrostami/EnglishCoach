@@ -81,10 +81,32 @@ export function ReviewView() {
     );
   }
 
-  return <FeedbackBody fb={data.feedback} />;
+  return <FeedbackBody fb={data.feedback} onAction={(c, action) => {
+    // Optimistic: the review is a list the learner is working through, and a
+    // button that waits on a round trip feels broken. A failure reverts it.
+    setData((d) => d?.feedback ? {
+      ...d,
+      feedback: {
+        ...d.feedback,
+        corrections: d.feedback.corrections.map((x) => x.id === c.id ? { ...x, learnerAction: action } : x),
+      },
+    } : d);
+    void api.setCorrectionAction(data.feedback!.sessionId, c.id, action).catch(() => {
+      setData((d) => d?.feedback ? {
+        ...d,
+        feedback: {
+          ...d.feedback,
+          corrections: d.feedback.corrections.map((x) => x.id === c.id ? { ...x, learnerAction: "pending" } : x),
+        },
+      } : d);
+    });
+  }} />;
 }
 
-function FeedbackBody({ fb }: { fb: SessionFeedback }) {
+function FeedbackBody({ fb, onAction }: {
+  fb: SessionFeedback;
+  onAction: (c: SessionFeedback["corrections"][number], action: "accepted" | "dismissed") => void;
+}) {
   const dims = Object.keys(fb.scores);
   return (
     <section className="ec-review">
@@ -146,6 +168,17 @@ function FeedbackBody({ fb }: { fb: SessionFeedback }) {
                 <div className="ec-review__meta">
                   <span className="ec-chip">{c.skill}</span>
                   <span>{formatPct(c.confidence)} confidence</span>
+                  {/* Persisted, so the choice survives leaving the screen. */}
+                  {c.learnerAction === "pending" ? (
+                    <>
+                      <button className="ec-btn ec-btn--sm" onClick={() => onAction(c, "accepted")}>Got it</button>
+                      <button className="ec-btn ec-btn--sm" onClick={() => onAction(c, "dismissed")}>Dismiss</button>
+                    </>
+                  ) : (
+                    <span className={"ec-trend ec-trend--" + (c.learnerAction === "accepted" ? "improving" : "unknown")}>
+                      {c.learnerAction}
+                    </span>
+                  )}
                 </div>
               </li>
             ))}

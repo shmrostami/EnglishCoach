@@ -22,6 +22,8 @@ vi.mock("../api/client.js", () => ({
       reasoning: "recurring past-tense errors",
     })),
     progress: vi.fn(async () => []),
+    // The dashboard now also loads the level history for the trend section.
+    levelHistory: vi.fn(async () => ({ sessions: 0, history: [], trends: {}, levels: [] })),
     goals: vi.fn(async () => []),
   },
 }));

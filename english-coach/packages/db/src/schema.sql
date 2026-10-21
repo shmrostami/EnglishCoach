@@ -279,3 +279,19 @@ CREATE TABLE diagnostics (
   rubric_version TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+-- Goal decomposition (spec §6.1 "decompose user goals into milestones").
+-- A milestone is a measurable step under a goal; an objective may point at one.
+CREATE TABLE goal_milestones (
+  id TEXT PRIMARY KEY,
+  goal_id TEXT NOT NULL REFERENCES learner_goals(id),
+  title TEXT NOT NULL,
+  description TEXT,
+  target_skill_code TEXT,
+  -- Met when the skill's mastery reaches this value, or explicitly.
+  target_mastery REAL,
+  status TEXT NOT NULL DEFAULT 'planned',
+  due_at INTEGER,
+  achieved_at INTEGER,
+  created_at INTEGER NOT NULL
+);

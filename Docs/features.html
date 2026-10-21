@@ -328,11 +328,11 @@
 
   <div class="stats">
     <div class="stat"><b>7</b><span>web routes</span></div>
-    <div class="stat"><b>26</b><span>HTTP + WS routes</span></div>
+    <div class="stat"><b>30</b><span>HTTP + WS routes</span></div>
     <div class="stat"><b>10</b><span>session states</span></div>
     <div class="stat"><b>20</b><span>skill codes</span></div>
     <div class="stat"><b>3</b><span>provider modes</span></div>
-    <div class="stat"><b>241</b><span>tests, 39 files</span></div>
+    <div class="stat"><b>251</b><span>tests, 39 files</span></div>
   </div>
 
   <section>
@@ -430,6 +430,9 @@
           <tr><td><code>GET …/activities/recommended</code></td><td>The guided-speaking activity for the top objective, generated once per objective. No objective is a valid empty state.</td></tr>
           <tr><td><code>POST …/activities/:id/attempts</code> · <code>…/activity-attempts/:id/submit</code></td><td>Starts and scores an attempt against the session transcript. Pronunciation and the activity's own target skill are reported as <code>not_assessed</code>, with the reason in the summary.</td></tr>
           <tr><td><code>POST/GET …/diagnostic</code></td><td>Self-report placement. Stored, labelled <code>self_report</code>, confidence ≤ 0.5, and it never writes skill mastery.</td></tr>
+          <tr><td><code>GET …/level-history</code></td><td>Every completed session oldest to newest with each dimension's trend — <code>null</code> where a dimension was never assessed twice — and the level recomputed at each point.</td></tr>
+          <tr><td><code>GET/POST …/goals/:goalId/milestones</code></td><td>The goal's steps, re-checked against real skill mastery on read, plus suggestions from the learner's weakest skills in that goal's family.</td></tr>
+          <tr><td><code>PATCH /v1/sessions/:id/corrections/:id</code></td><td>Records accept/dismiss on a correction. Idempotent; <code>pending</code> is the starting state and is refused.</td></tr>
           <tr><td><code>GET …/errors</code></td><td>Recurring error patterns with frequency, decayed effective frequency, severity, confidence, a representative correction, and a trend that stays <code>null</code> until two sessions carry evidence.</td></tr>
           <tr><td><code>GET …/review-queue</code></td><td>Due vocabulary within a review budget, alternating recognition with production.</td></tr>
           <tr><td><code>POST …/reviews/:word/attempts</code></td><td>Records an attempt and reschedules from it.</td></tr>
@@ -571,7 +574,7 @@
   </section>
 
   <footer>
-    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization, post-session feedback, review/settings, and activity/diagnostic slices. Paths are relative to the repository root. Test count reflects a green run of the full suite.
+    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization, post-session feedback, review/settings, activity/diagnostic, and progress/goal-decomposition slices. Paths are relative to the repository root. Test count reflects a green run of the full suite.
   </footer>
 
 </div>

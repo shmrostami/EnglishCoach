@@ -384,6 +384,127 @@ describe("HTTP API", () => {
     await isolated.close();
   });
 
+  it("records what the learner did with a correction and rejects a bad action", async () => {
+    const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
+    sqlite.prepare(
+      "INSERT INTO corrected_sentences (id, session_id, original, suggested, explanation, skill_code, evidence, confidence, learner_action, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    ).run("corr-act", created.sessionId, "Yesterday I go to work", "Yesterday I went to work",
+      'Replace "go" with "went" here.', "grammar.past_tense", "Yesterday I go to work", 0.9, "pending", Date.now());
+
+    const ok = await app.inject({
+      method: "PATCH", url: `/v1/sessions/${created.sessionId}/corrections/corr-act`,
+      payload: { learnerAction: "accepted" },
+    });
+    expect(ok.statusCode).toBe(200);
+    const row = sqlite.prepare("SELECT learner_action FROM corrected_sentences WHERE id='corr-act'").get() as { learner_action: string };
+    expect(row.learner_action).toBe("accepted");
+
+    // Repeating the same action is idempotent, not an error.
+    const again = await app.inject({
+      method: "PATCH", url: `/v1/sessions/${created.sessionId}/corrections/corr-act`,
+      payload: { learnerAction: "accepted" },
+    });
+    expect(again.statusCode).toBe(200);
+
+    // Only the two real actions are accepted — "pending" is the initial state.
+    expect((await app.inject({
+      method: "PATCH", url: `/v1/sessions/${created.sessionId}/corrections/corr-act`,
+      payload: { learnerAction: "pending" },
+    })).statusCode).toBe(400);
+    // A correction from another session is not addressable.
+    expect((await app.inject({
+      method: "PATCH", url: `/v1/sessions/sess-other/corrections/corr-act`,
+      payload: { learnerAction: "accepted" },
+    })).statusCode).toBe(404);
+  });
+
+  it("answers level history with per-dimension trends, and null where a dimension was never assessed twice", async () => {
+    const fresh = openDb(":memory:");
+    migrate(fresh);
+    ensureSeed(fresh);
+    const isolated = await buildApp({
+      service: new SessionService(db(fresh)), db: db(fresh), registry: new BridgeRegistry(),
+      selectSpeech: () => new MockSpeechProvider({ turns: SCRIPT, autoClose: false }),
+      env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 60_000, OPENAI_API_KEY: undefined },
+      queue: () => {},
+    });
+    const svc = new SessionService(db(fresh));
+    const insert = (i: number, grammar: number | null) => {
+      const sess = svc.createSession(LEARNER_ID, Date.now() - (10 - i) * 1000);
+      fresh.prepare(
+        "UPDATE sessions SET status='COMPLETED', fluency_score=?, grammar_score=?, vocabulary_score=?, pronunciation_score=NULL, coherence_score=?, interaction_score=?, overall_score=? WHERE id=?",
+      ).run(0.6, grammar, 0.7, 0.5, 0.8, 0.65, sess.id);
+      return sess.id;
+    };
+    insert(0, 0.4);
+    insert(1, 0.6);
+    insert(2, 0.8);
+
+    const res = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/level-history` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      sessions: number;
+      trends: Record<string, string | null>;
+      levels: { level: string }[];
+    };
+    expect(body.sessions).toBe(3);
+    expect(body.trends.grammar).toBe("improving");
+    // Never assessed in any session → no trend at all, not a flat line.
+    expect(body.trends.pronunciation).toBeNull();
+    expect(body.levels).toHaveLength(3);
+    expect(body.levels[2].level).toBeTruthy();
+
+    expect((await isolated.inject({ method: "GET", url: "/v1/learners/nobody/level-history" })).statusCode).toBe(404);
+    await isolated.close();
+  });
+
+  it("decomposes a goal into milestones that mark themselves achieved from real mastery", async () => {
+    const fresh = openDb(":memory:");
+    migrate(fresh);
+    ensureSeed(fresh);
+    const isolated = await buildApp({
+      service: new SessionService(db(fresh)), db: db(fresh), registry: new BridgeRegistry(),
+      selectSpeech: () => new MockSpeechProvider({ turns: SCRIPT, autoClose: false }),
+      env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 60_000, OPENAI_API_KEY: undefined },
+      queue: () => {},
+    });
+    // A weak grammar skill makes a grammar-goal milestone suggestible.
+    fresh.prepare(
+      "INSERT INTO skills (id, learner_id, code, mastery, confidence, trend, observation_count) VALUES (?,?,?,?,?,?,?)",
+    ).run("sk-1", LEARNER_ID, "grammar.past_tense", 0.3, 0.5, "stable", 3);
+
+    const listed = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/goals/goal-2/milestones` });
+    expect(listed.statusCode).toBe(200);
+    const body = listed.json() as { milestones: unknown[]; suggested: { targetSkillCode: string }[] };
+    expect(body.milestones).toHaveLength(0);
+    expect(body.suggested[0].targetSkillCode).toBe("grammar.past_tense");
+
+    const created = await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/goals/goal-2/milestones`,
+      payload: { title: "Past tense to 70%", targetSkillCode: "grammar.past_tense", targetMastery: 0.7 },
+    });
+    expect(created.statusCode).toBe(201);
+
+    // Still below threshold: not achieved.
+    const below = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/goals/goal-2/milestones` });
+    expect((below.json() as { milestones: { status: string }[] }).milestones[0].status).toBe("planned");
+
+    // Mastery crosses the bar: the next read marks it achieved, and the
+    // suggestion for that skill disappears.
+    fresh.prepare("UPDATE skills SET mastery=0.75 WHERE id='sk-1'").run();
+    const above = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/goals/goal-2/milestones` });
+    const after = above.json() as { milestones: { status: string }[]; suggested: { targetSkillCode: string }[] };
+    expect(after.milestones[0].status).toBe("achieved");
+    expect(after.suggested.some((s) => s.targetSkillCode === "grammar.past_tense")).toBe(false);
+
+    expect((await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/goals/goal-nope/milestones` })).statusCode).toBe(404);
+    expect((await isolated.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/goals/goal-2/milestones`,
+      payload: { title: "bad", targetMastery: 5 },
+    })).statusCode).toBe(400);
+    await isolated.close();
+  });
+
   it("runs the diagnostic, labels it self-report, and rejects impossible answers", async () => {
     const fresh = openDb(":memory:");
     migrate(fresh);

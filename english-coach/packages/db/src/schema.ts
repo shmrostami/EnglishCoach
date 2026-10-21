@@ -266,6 +266,21 @@ export const diagnostics = sqliteTable("diagnostics", {
   createdAt: integer("created_at").notNull(),
 });
 
+// A measurable step under a goal (spec §6.1). Met when its skill reaches
+// `targetMastery`, checked deterministically — never marked by a model.
+export const goalMilestones = sqliteTable("goal_milestones", {
+  id: text("id").primaryKey(),
+  goalId: text("goal_id").notNull().references(() => goalsTable.id),
+  title: text("title").notNull(),
+  description: text("description"),
+  targetSkillCode: text("target_skill_code"),
+  targetMastery: real("target_mastery"),
+  status: text("status").notNull().default("planned"),
+  dueAt: integer("due_at"),
+  achievedAt: integer("achieved_at"),
+  createdAt: integer("created_at").notNull(),
+});
+
 export type SkillRow = typeof skills.$inferSelect;
 export type ErrorRow = typeof errorPatterns.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
@@ -283,3 +298,4 @@ export type ObjectiveRow = typeof learningObjectives.$inferSelect;
 export type ActivityRow = typeof activities.$inferSelect;
 export type ActivityAttemptRow = typeof activityAttempts.$inferSelect;
 export type DiagnosticRow = typeof diagnostics.$inferSelect;
+export type MilestoneRow = typeof goalMilestones.$inferSelect;

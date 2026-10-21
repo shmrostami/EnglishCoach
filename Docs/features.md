@@ -135,6 +135,10 @@ All under `apps/api/src/routes/`. Any learner other than `learner-1` returns 404
 | GET | `/v1/learners/:id/activity-attempts` | Attempt history with its stored result. |
 | POST | `/v1/learners/:id/diagnostic` | Three self-ratings → band, difficulty, low confidence, `basis: "self_report"`. Persists and seeds `estimatedLevel`; **never** writes skill mastery. 400 outside 0..1 / 0..7. |
 | GET | `/v1/learners/:id/diagnostic` | Latest placement, or `{diagnostic: null}`. |
+| GET | `/v1/learners/:id/level-history` | Every completed session oldest→newest with its six scores, a per-dimension trend (`null` when fewer than two sessions assessed it), and the level estimate recomputed at each point. |
+| GET | `/v1/learners/:id/goals/:goalId/milestones` | The goal's milestones, re-checked against current skill mastery on read, plus `suggested` milestones derived from the learner's weakest skills in that goal's family. |
+| POST | `/v1/learners/:id/goals/:goalId/milestones` | Requires `title`; `targetMastery` must be 0–1. 201 `{id}`. |
+| PATCH | `/v1/sessions/:id/corrections/:correctionId` | Sets `learnerAction` to `accepted` or `dismissed`. Idempotent; `pending` is the initial state and is refused; a correction from another session is 404. |
 | GET | `/v1/learners/:id/errors` | Active recurring-error patterns with frequency, decayed `effectiveFrequency`, severity, confidence, first/last seen, a representative correction as `example`, and `trend` — `null` while fewer than two sessions carry evidence. |
 | GET | `/v1/learners/:id/review-queue` | Due vocabulary items (`?limit=`, max 50), soonest first, each with its prompt type — recognition, or production once recall exists. |
 | POST | `/v1/learners/:id/reviews/:word/attempts` | Records a review attempt (`outcome` required, optional `hintUsed`/`promptType`) and reschedules from it. Unknown word 404, bad outcome 400. |
@@ -219,6 +223,7 @@ Pure functions, no I/O — `packages/learning-engine/src/`, all exported from `i
 | `prioritization.ts` | `calculatePriority`, `rankCandidates`, `goalRelevanceFor`, `DEFAULT_NO_HISTORY` | six terms: recurrence .25, severity .20, goal relevance .20, communicative impact .15, readiness .10, forgetting risk .10 |
 | `activity.ts` | `assessGuidedSpeaking`, `selectObjective`, `GUIDED_RUBRIC_VERSION` | deterministic activity result: word coverage + speaking time scored, the target skill and pronunciation marked `not_assessed` with the reason spelled out |
 | `diagnostic.ts` | `runDiagnostic`, `DIAGNOSTIC_VERSION` | self-report placement: band, difficulty, confidence capped at 0.5, `basis: self_report`, frequency capped at a week of daily practice |
+| `goals.ts` | `milestoneMet`, `suggestMilestones` | a milestone is met when its skill reaches the target (checked deterministically, never marked by a model); suggestions come from the learner's actual weak skills, capped at three, targeting 0.7 |
 | `review.ts` | `nextIntervalDays`, `applyReviewOutcome`, `dueAt`, `isDue`, `selectReviewQueue`, `SCHEDULER_VERSION` | documented interval policy — correct ×2.5, lapse back to 1 day, capped at 180; a hint counts as partial success; queue picks due items within a budget and alternates recognition with production |
 | `feedback.ts` | `deriveFeedback` | review shape from a stored analysis: unassessed dimensions, top-3 strengths by confidence, top-3 corrections by severity (a `suggested` sentence only when the wrong form actually occurs in the quoted evidence, else `null`), deduped vocabulary |
 | `planning.ts` | `selectTargets`, `chooseIntervention`, `estimateLevel` | drop mastery ≥ .8, take 2 primary + 1 secondary; intervention by family; CEFR banding A2/B1/B1+/B2+/C1 with confidence `clamp(.3 + .05·sessions, .3, .95)` |
@@ -284,7 +289,7 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 |---|---|---|
 | §24 Pronunciation architecture | **design-only** | Nothing is measured. No phoneme, IPA, accent or acoustic pipeline exists. The `pronunciation` score is now `null` ("not assessed") unless an analysis provider declares `capabilities.pronunciationEvidence` — no current provider does — and the analysis prompt now requires `"pronunciation": null`. The three `pronunciation.*` skill codes still exist but nothing feeds them. |
 | §12–13 `UPDATE_MEMORY` / `PLAN_NEXT` states | **not states** | Implemented as jobs, not session states. |
-| §18 memory-update prompt | **dead code** | `packages/prompts/prompts/memory/v1.txt` is registered but has zero call sites. Memory writes are deterministic. |
+| §18 memory-update prompt | **removed** | The `memory` prompt was registered but never called, and spec §16.5 forbids an LLM mutating authoritative learner state. Deleted rather than wired. |
 | §21 LLM tool layer | **not implemented** | Design lists seven tools; only `request_micro_coaching` and `request_target_retry` exist, and memory is written by the engine, not the model. |
 | §30 session types | **not implemented** | Only traces are `role_play`/`storytelling` as intervention-type values. No rotation. |
 | §10 conversation difficulty decomposition | **partial** | One scalar 0–1 adjusted in ±.02/.05 steps; the six-part decomposition is absent. |
@@ -292,12 +297,12 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 | §29 priority formula | **implemented** | `prioritization.ts`, exact design weights. |
 | §11 adaptive difficulty | **implemented** | `difficulty.ts`; no hysteresis. |
 | Spaced vocabulary review | **partial** | Due queue, attempts and rescheduling are implemented (`interval-v1`). The scheduler is a documented interval policy, **not** SM-2 or FSRS. Review is button-driven in the UI, not a spoken or typed recall exercise. |
-| Goal decomposition | **not implemented** | Goals are flat text rows. |
+| Goal decomposition | **implemented** | `goal_milestones` + suggestion from real weak skills; status is re-derived on read. |
 | Dashboard recurring errors | **implemented** | `GET /v1/learners/:id/errors` + the Review page section; `trend` stays `null` under two sessions of evidence. |
-| Correction accept/dismiss | **partial** | `corrected_sentences.learner_action` exists and defaults to `pending`; no route or control changes it yet. |
+| Correction accept/dismiss | **implemented** | `PATCH /v1/sessions/:id/corrections/:correctionId` plus Got it / Dismiss buttons on the review page, applied optimistically and reverted on failure. |
 | Learning objectives / activity attempts | **partial** | Objectives, one activity type (`guided_speaking`) and attempts exist. No curriculum units, no sequencing, and no other activity type. |
 | Diagnostic onboarding | **partial** | A three-question self-report placement exists and is stored. It is not an assessment and does not touch skill mastery. Broader modalities (listening, reading, writing, dictation) are still absent. |
-| Level history / per-dimension trends | **not implemented** | `/progress` returns the last 10 sessions only. |
+| Level history / per-dimension trends | **implemented** | `GET /v1/learners/:id/level-history` + a Dashboard section; a dimension never assessed twice reports `null`, not a flat line. |
 | §25/§32 V2–V4 roadmap | **not implemented** | Personalized curriculum, teacher dashboard, advanced pronunciation. |
 | Redis / object storage / audio recordings / WebRTC | **out of scope by design** | Spec §1 non-goals. |
 
@@ -330,9 +335,11 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 
 ## 11. Tests
 
-`pnpm test` — 39 files, 241 tests, all passing (vitest). Includes an end-to-end pipeline test
+`pnpm test` — 39 files, 251 tests, all passing (vitest). Includes an end-to-end pipeline test
 (`apps/api/tests/e2e/pipeline.test.ts`) proving session → utterances → analysis → memory →
 plan → next-session targets, and a real-Python sidecar test.
+
+Test-runner caveats on this machine: `apps/api/tests/env.test.ts` calls `process.chdir()`, which worker threads refuse, so it must run with `--pool=forks`; conversely the forks pool here dies with `spawn UNKNOWN` / `Fatal process out of memory: Zone`, so everything else runs under `--pool=threads --poolOptions.threads.singleThread=true`.
 
 Must run on Node 22: `better-sqlite3` is compiled for Node 22 and Node 24 refuses to load it.
 `packages/openai/src/local/voice_sidecar.test.ts` loads Whisper in a real Python child; on a

@@ -112,6 +112,25 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
     };
   });
 
+  /**
+   * Record what the learner did with a correction (spec §5 Phase 1: "learner
+   * action"). Persisted so the review survives a reload, and idempotent — the
+   * same action twice is a no-op, not an error.
+   */
+  app.patch("/v1/sessions/:id/corrections/:correctionId", (req, reply) => {
+    const { id, correctionId } = req.params as { id: string; correctionId: string };
+    const body = (req.body ?? {}) as { learnerAction?: string };
+    if (body.learnerAction !== "accepted" && body.learnerAction !== "dismissed") {
+      return reply.code(400).send({ error: "learnerAction must be 'accepted' or 'dismissed'" });
+    }
+    const row = db.select().from(correctedSentences)
+      .where(and(eq(correctedSentences.id, correctionId), eq(correctedSentences.sessionId, id))).all()[0];
+    if (!row) return reply.code(404).send({ error: "unknown correction" });
+    db.update(correctedSentences).set({ learnerAction: body.learnerAction })
+      .where(eq(correctedSentences.id, correctionId)).run();
+    return { correctionId, learnerAction: body.learnerAction };
+  });
+
   /** Failed jobs, newest first, with their attempt history. */
   app.get("/v1/jobs/failed", async () => {
     const failed = db.select().from(jobs)

@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 
-export type PromptName = "conversation" | "analysis" | "planning" | "memory";
+// No "memory" prompt: learner memory is written deterministically by the
+// learning engine, and spec §16.5 forbids an LLM mutating authoritative learner
+// state. The prompt that existed for it was registered but never called.
+export type PromptName = "conversation" | "analysis" | "planning";
 
 export interface PromptVersion {
   name: PromptName;
@@ -17,7 +20,6 @@ const REGISTRY: Record<PromptName, PromptVersion & { file: string }> = {
   conversation: { name: "conversation", version: "v1", model: "realtime", temperature: 0.7, file: "conversation/v1.txt" },
   analysis: { name: "analysis", version: "v1", model: "responses", temperature: 0.2, file: "analysis/v1.txt" },
   planning: { name: "planning", version: "v1", model: "responses", temperature: 0.4, file: "planning/v1.txt" },
-  memory: { name: "memory", version: "v1", model: "responses", temperature: 0.1, file: "memory/v1.txt" },
 };
 
 export function promptMeta(name: PromptName): PromptVersion {

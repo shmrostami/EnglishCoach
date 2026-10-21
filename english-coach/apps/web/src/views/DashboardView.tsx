@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api/client.js";
+import { api, type LevelHistory } from "../api/client.js";
 
 interface SkillRow {
   code: string;
@@ -61,6 +61,7 @@ export function DashboardView() {
   const [skills, setSkills] = useState<SkillRow[]>([]);
   const [plan, setPlan] = useState<PlanRow | null>(null);
   const [progress, setProgress] = useState<ProgressRow[]>([]);
+  const [history, setHistory] = useState<LevelHistory | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
@@ -71,6 +72,7 @@ export function DashboardView() {
     void api.skills().then((s) => setSkills(s as unknown as SkillRow[])).catch(fail);
     void api.plan().then((p) => setPlan(p as unknown as PlanRow | null)).catch(fail);
     void api.progress().then((p) => setProgress(p as unknown as ProgressRow[])).catch(fail);
+    void api.levelHistory().then(setHistory).catch(fail);
   }, []);
 
   const level = (profile?.estimatedLevel as string) ?? null;
@@ -164,6 +166,30 @@ export function DashboardView() {
                 ))}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="section">
+        <h2 className="section__title">Since you started</h2>
+        {history === null ? (
+          <p className="ec-empty">Loading…</p>
+        ) : history.sessions < 2 ? (
+          // Two points make a trend; one session is a sample, not a direction.
+          <p className="ec-empty">Trends appear after your second session — one session is not a direction.</p>
+        ) : (
+          <div className="ec-mastery">
+            {Object.entries(history.trends)
+              .filter(([, t]) => t !== null)
+              .map(([dim, trend]) => (
+                <div key={dim} className="ec-mastery__row">
+                  <span className="ec-skill__name">{SCORE_DIMENSIONS.find(([k]) => k === dim)?.[1] ?? dim}</span>
+                  <span className={"ec-trend ec-trend--" + trend}>{trend}</span>
+                </div>
+              ))}
+            {Object.values(history.trends).every((t) => t === null) && (
+              <p className="ec-empty">No dimension has been assessed twice yet, so there is nothing to compare.</p>
+            )}
           </div>
         )}
       </div>

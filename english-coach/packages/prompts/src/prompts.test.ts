@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { loadPrompt, renderPrompt, promptMeta } from "./index.js";
 
 describe("prompt loader", () => {
-  it("loads all four versioned prompts", () => {
-    for (const name of ["conversation", "analysis", "planning", "memory"] as const) {
+  it("loads every registered prompt — there is no dead 'memory' one any more", () => {
+    for (const name of ["conversation", "analysis", "planning"] as const) {
       expect(loadPrompt(name).length).toBeGreaterThan(100);
     }
   });
