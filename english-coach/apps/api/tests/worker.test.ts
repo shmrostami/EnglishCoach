@@ -204,7 +204,11 @@ describe("runAnalysis (mock provider)", () => {
     expect(stored.scores.pronunciation).toBeNull();
   });
 
-  it("keeps a pronunciation score only when the provider declares audio evidence", async () => {
+  it("never keeps a pronunciation number from a provider, even one that claims audio evidence", async () => {
+    // A provider's pronunciation score is no longer sufficient: the score must
+    // come from the retained audio, measured by the acoustic assessment
+    // (spec §12.1). A provider number — however confident the provider —
+    // is stripped, because the provider did not measure the samples.
     const grounded: AnalysisProvider = {
       capabilities: { pronunciationEvidence: true },
       analyze: async () => ({
@@ -219,7 +223,8 @@ describe("runAnalysis (mock provider)", () => {
     };
     await runAnalysis({ db: d, provider: grounded, sessionId, now: NOW + 120000 });
     const session = d.select().from(sessions).where(eq(sessions.id, sessionId)).all()[0];
-    expect(session.pronunciationScore).toBe(0.65);
+    // No audio was retained for this session, so there is nothing to measure.
+    expect(session.pronunciationScore).toBeNull();
   });
 
   it("strips a pronunciation number from a provider that cannot ground it", async () => {

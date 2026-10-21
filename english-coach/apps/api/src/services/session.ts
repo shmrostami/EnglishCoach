@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, desc } from "drizzle-orm";
 import {
-  sessions, utterances, interventions, learningPlans, tryParseJson,
+  sessions, utterances, interventions, learningPlans, audioEvidence, tryParseJson,
 } from "@ec/db";
 import type { DrizzleDb, SessionRow } from "@ec/db";
 import type {
@@ -56,6 +56,38 @@ export class SessionService {
     this.d.insert(interventions).values({
       id: `int-${randomUUID()}`, sessionId, kind, skillCode: skill, state: null, createdAt: now,
     }).run();
+  }
+
+  /**
+   * Stores the learner's audio for one turn.
+   *
+   * This is the only path by which audio reaches a pronunciation assessment
+   * (spec §12.1). The samples are kept with the turn they belong to, so a
+   * score is always measured against the words that were said.
+   */
+  recordAudioEvidence(opts: {
+    sessionId: string;
+    utteranceId: string | null;
+    pcm: Buffer;
+    sampleRate: number;
+    now: number;
+  }): string | null {
+    if (opts.pcm.length === 0) return null;
+    const id = `aud-${randomUUID()}`;
+    const sampleCount = Math.floor(opts.pcm.length / 2);
+    this.d.insert(audioEvidence).values({
+      id,
+      sessionId: opts.sessionId,
+      utteranceId: opts.utteranceId,
+      speaker: "learner",
+      sampleRate: opts.sampleRate,
+      sampleCount,
+      durationMs: Math.round((sampleCount / opts.sampleRate) * 1000),
+      pcmBase64: opts.pcm.toString("base64"),
+      measurements: null,
+      createdAt: opts.now,
+    }).run();
+    return id;
   }
 
   transition(sessionId: string, to: SessionState, now: number): boolean {

@@ -3,7 +3,8 @@ import { eq, and, ne, inArray } from "drizzle-orm";
 import {
   sessions, utterances, observations, skills, errorPatterns, vocabularyItems,
   learners, jobs, correctedSentences, vocabularyItemsCanonical, vocabularyState,
-  difficultyProfiles, interventions, tryParseJson, type DrizzleDb,
+  difficultyProfiles, interventions, audioEvidence, pronunciationAssessments,
+  tryParseJson, type DrizzleDb,
 } from "@ec/db";
 import type { Scores, SessionAnalysis, SessionMetrics, Observation, SkillState } from "@ec/domain";
 import { SessionAnalysisSchema } from "@ec/domain";
@@ -13,6 +14,7 @@ import {
   upsertErrorInput, shouldRetire, estimateLevel, deriveFeedback,
   lemmaCandidates, applyVocabEvidence, INITIAL_VOCAB_STATE, type VocabState,
   decomposeDifficulty,
+  decodePcm16, measureAudio, scorePronunciation, PRONUNCIATION_RUBRIC_VERSION,
   type ErrorPatternInput,
 } from "@ec/learning-engine";
 import { buildLearnerContext } from "./context.js";
@@ -65,8 +67,13 @@ export async function runAnalysis(opts: {
   // A provider that cannot ground a score in audio must not contribute one:
   // the number is stripped here, not merely discouraged in the prompt
   // (spec §12.1 / §3 principle 7 — no fabricated measurement).
-  const scores: Scores = provider.capabilities.pronunciationEvidence
-    ? analysis.scores
+  //
+  // The acoustic assessment below is the ONLY thing that can supply a
+  // pronunciation score, and it runs on the retained audio rather than on the
+  // provider's answer.
+  const acoustic = assessPronunciation(d, sessionId, now);
+  const scores: Scores = acoustic
+    ? { ...analysis.scores, pronunciation: acoustic.intelligibility }
     : { ...analysis.scores, pronunciation: null };
   const overall = calculateOverall(scores);
   // The stored analysis carries the same stripped scores as the columns, so a
@@ -81,6 +88,7 @@ export async function runAnalysis(opts: {
   // 4) persist the difficulty profile (design.md §10) so the composite the
   // planner used can be explained component by component.
   persistDifficultyProfile(d, sessionId, session.learnerId, turns, metrics, now);
+
 
   // 5) persist the reviewable corrections (spec §11.3). Derived from the
   // stored analysis, so a retry writes the same rows; the `any existing` guard
@@ -155,6 +163,81 @@ export async function runAnalysis(opts: {
  * than a new one. One profile per session (UNIQUE session_id), so a re-run
  * overwrites rather than stacks.
  */
+/**
+ * Measures the session's retained audio and stores the assessment.
+ *
+ * Returns null when there is nothing to measure: no audio was retained (the
+ * OpenAI Realtime provider does not keep samples), or the audio was too short
+ * to judge. Either way the pronunciation dimension stays null — "not
+ * assessed", never a number derived from the transcript.
+ */
+function assessPronunciation(
+  d: DrizzleDb,
+  sessionId: string,
+  now: number,
+): { intelligibility: number; stress: number; rhythm: number; confidence: number } | null {
+  const rows = d.select().from(audioEvidence)
+    .where(eq(audioEvidence.sessionId, sessionId)).all();
+  if (rows.length === 0) return null;
+
+  // Every retained turn is measured, and the results are averaged weighted by
+  // how much audio each turn holds — a long turn says more than a clipped one.
+  let weightSum = 0;
+  let intelligibility = 0;
+  let stress = 0;
+  let rhythm = 0;
+  let confidence = 0;
+  for (const row of rows) {
+    const pcm = decodePcm16(row.pcmBase64);
+    const measurements = measureAudio(pcm, row.sampleRate);
+    const scored = scorePronunciation(measurements);
+    if (scored.confidence === 0) continue;
+    const weight = measurements.durationSec;
+    weightSum += weight;
+    intelligibility += scored.intelligibility * weight;
+    stress += scored.stress * weight;
+    rhythm += scored.rhythm * weight;
+    confidence += scored.confidence * weight;
+    // The measurements are kept with the audio, so a score can be re-checked
+    // against the samples that produced it.
+    d.update(audioEvidence).set({ measurements: JSON.stringify(measurements) })
+      .where(eq(audioEvidence.id, row.id)).run();
+  }
+  if (weightSum === 0) return null;
+
+  const result = {
+    intelligibility: Number((intelligibility / weightSum).toFixed(4)),
+    stress: Number((stress / weightSum).toFixed(4)),
+    rhythm: Number((rhythm / weightSum).toFixed(4)),
+    confidence: Number((confidence / weightSum).toFixed(4)),
+  };
+
+  const evidenceId = rows[0].id;
+  const existing = d.select().from(pronunciationAssessments)
+    .where(eq(pronunciationAssessments.audioEvidenceId, evidenceId)).all()[0];
+  if (existing) {
+    d.update(pronunciationAssessments).set({
+      intelligibility: result.intelligibility,
+      stress: result.stress,
+      rhythm: result.rhythm,
+      confidence: result.confidence,
+    }).where(eq(pronunciationAssessments.id, existing.id)).run();
+  } else {
+    d.insert(pronunciationAssessments).values({
+      id: `pron-${randomUUID()}`,
+      sessionId,
+      audioEvidenceId: evidenceId,
+      rubricVersion: PRONUNCIATION_RUBRIC_VERSION,
+      intelligibility: result.intelligibility,
+      stress: result.stress,
+      rhythm: result.rhythm,
+      confidence: result.confidence,
+      createdAt: now,
+    }).run();
+  }
+  return result;
+}
+
 function persistDifficultyProfile(
   d: DrizzleDb,
   sessionId: string,

@@ -8,7 +8,7 @@ import {
 import type { ActivityStatus, SessionMetrics } from "@ec/domain";
 import {
   assessGuidedSpeaking, selectObjective, GUIDED_RUBRIC_VERSION,
-  runDiagnostic, type DiagnosticAnswers,
+  runDiagnostic, MODALITIES, type DiagnosticAnswers,
 } from "@ec/learning-engine";
 
 function hasLearner(d: DrizzleDb, id: string): boolean {
@@ -207,6 +207,25 @@ export function registerActivityRoutes(app: FastifyInstance, d: DrizzleDb): void
         rubricVersion: row.rubricVersion, createdAt: row.createdAt,
       },
     };
+  });
+
+  /**
+   * The activity types the app can offer (spec Phase 3), each with the skills
+   * it can actually evidence. A modality that cannot measure a skill does not
+   * list it — that is the whole point of the per-modality rubric.
+   */
+  app.get("/v1/learners/:id/activities/types", (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!hasLearner(d, id)) return reply.code(404).send({ error: "unknown learner" });
+    return MODALITIES.map((m) => ({
+      type: m.modality,
+      label: m.label,
+      inputModality: m.inputModality,
+      outputModality: m.outputModality,
+      evidenceSkills: m.evidenceSkills,
+      rubricVersion: m.rubricVersion,
+      requiresAudioEvidence: m.requiresAudioEvidence,
+    }));
   });
 
   app.get("/v1/learners/:id/activity-attempts", (req, reply) => {

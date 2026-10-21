@@ -97,6 +97,11 @@ export class RealtimeBridge {
   }
 
   private handleTranscript(turn: TranscriptTurn): void {
+    // A learner turn is the moment the audio for that turn is available: the
+    // provider has just finished transcribing it. The samples are stored so a
+    // pronunciation assessment can measure them (spec §12.1) — without them
+    // the dimension stays "not assessed".
+    if (turn.speaker === "learner") this.captureLearnerAudio();
     const { seq } = this.opts.service.recordUtterance(this.opts.sessionId, {
       speaker: turn.speaker, text: turn.text, startedAt: turn.startedAt, endedAt: turn.endedAt,
     });
@@ -124,6 +129,27 @@ export class RealtimeBridge {
     } else {
       this.opts.provider.sendInstruction(`Create a new situation where the learner must use the ${e.skill} structure naturally, then let them try it.`);
     }
+  }
+
+  /**
+   * Takes the learner's audio from the provider and stores it.
+   *
+   * Silent when the provider has no audio to give — the OpenAI Realtime
+   * provider does not retain the samples, so its sessions report pronunciation
+   * as not assessed rather than guessing.
+   */
+  private captureLearnerAudio(): void {
+    const take = this.opts.provider.takeLearnerAudio;
+    if (!take) return;
+    const audio = take.call(this.opts.provider);
+    if (!audio) return;
+    this.opts.service.recordAudioEvidence({
+      sessionId: this.opts.sessionId,
+      utteranceId: null,
+      pcm: audio.pcm,
+      sampleRate: audio.sampleRate,
+      now: Date.now(),
+    });
   }
 
   private maybeTransition(from: SessionState, to: SessionState, intervention?: "challenge"): void {

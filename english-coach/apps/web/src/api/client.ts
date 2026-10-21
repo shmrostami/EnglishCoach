@@ -154,6 +154,14 @@ export interface Milestone {
   achievedAt: number | null;
 }
 
+export interface PronunciationAssessment {
+  rubricVersion: string;
+  intelligibility: number | null;
+  stress: number | null;
+  rhythm: number | null;
+  confidence: number;
+}
+
 export const api = {
   createSession: () => http<{ sessionId: string; topic: string; difficulty: number; state: string }>(
     `/v1/learners/${LEARNER_ID}/sessions`, { method: "POST" }),
@@ -164,6 +172,8 @@ export const api = {
   endSession: (id: string) => http<{ state: string }>(`/v1/sessions/${id}/end`, { method: "POST" }),
   retryAnalysis: (id: string) => http<{ state: string; sessionId: string }>(`/v1/sessions/${id}/analyze`, { method: "POST" }),
   feedback: (id: string) => http<FeedbackResponse>(`/v1/sessions/${id}/feedback`),
+  pronunciation: (id: string) => http<{ pronunciation: PronunciationAssessment | null }>(`/v1/sessions/${id}/pronunciation`),
+  difficultyProfile: (id: string) => http<{ difficulty: Record<string, number> | null }>(`/v1/sessions/${id}/difficulty`),
   setCorrectionAction: (sessionId: string, correctionId: string, learnerAction: "accepted" | "dismissed") =>
     http<{ correctionId: string; learnerAction: string }>(
       `/v1/sessions/${sessionId}/corrections/${correctionId}`,

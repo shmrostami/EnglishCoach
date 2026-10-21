@@ -4,7 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import {
   learners, errorPatterns, correctedSentences, vocabularyItems, reviewAttempts,
   learnerPreferences, sessions, vocabularyItemsCanonical, vocabularyState,
-  difficultyProfiles, type DrizzleDb,
+  difficultyProfiles, pronunciationAssessments, type DrizzleDb,
 } from "@ec/db";
 import type { ErrorPatternView } from "@ec/domain";
 import {
@@ -163,6 +163,29 @@ export function registerLearningRoutes(app: FastifyInstance, d: DrizzleDb): void
         };
       })
       .sort((a, b) => a.productionMastery - b.productionMastery);
+  });
+
+  /**
+   * The pronunciation assessment of a session (spec §24).
+   *
+   * Present only when there was audio to measure. A session with no retained
+   * audio answers `pronunciation: null` — the dimension was not assessed, and
+   * saying so is the honest answer (spec §12.1).
+   */
+  app.get("/v1/sessions/:id/pronunciation", (req, reply) => {
+    const { id } = req.params as { id: string };
+    const row = d.select().from(pronunciationAssessments)
+      .where(eq(pronunciationAssessments.sessionId, id)).all()[0];
+    if (!row) return reply.send({ pronunciation: null });
+    return {
+      pronunciation: {
+        rubricVersion: row.rubricVersion,
+        intelligibility: row.intelligibility,
+        stress: row.stress,
+        rhythm: row.rhythm,
+        confidence: row.confidence,
+      },
+    };
   });
 
   /** The six-part difficulty profile of a session (design.md §10). */

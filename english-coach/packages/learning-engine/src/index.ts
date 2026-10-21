@@ -11,3 +11,6 @@ export * from "./diagnostic.js";
 export * from "./goals.js";
 export * from "./vocabulary.js";
 export * from "./difficulty-decomposition.js";
+export * from "./session-types.js";
+export * from "./modalities.js";
+export * from "./pronunciation.js";

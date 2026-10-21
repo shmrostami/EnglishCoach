@@ -67,6 +67,12 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
   // pacers would emit audio into the same ring buffer at once and two
   // continuations would scramble `history`. Each turn awaits the previous one.
   private turnChain = Promise.resolve();
+  /**
+   * The audio of the learner's last turn, kept so a pronunciation assessment
+   * can measure it (spec §12.1). A score needs the samples; the transcript
+   * cannot substitute for them. Consumed by `takeLearnerAudio`.
+   */
+  private lastLearnerAudio: { pcm: Buffer; sampleRate: number } | null = null;
 
   constructor(private readonly opts: LocalProviderOptions) {
     this.now = opts.now ?? Date.now;
@@ -114,6 +120,18 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
     // the standing system prompt rather than appending forever.
     this.history = this.history.filter((m) => m.content !== this.warmup);
     this.history.unshift({ role: "system", content: text });
+  }
+
+  /**
+   * The learner's audio for the last turn, or null when there is none.
+   *
+   * Reading it CLEARS it: the audio belongs to one turn, and a later turn's
+   * audio must not be scored against an earlier turn's words.
+   */
+  takeLearnerAudio(): { pcm: Buffer; sampleRate: number } | null {
+    const audio = this.lastLearnerAudio;
+    this.lastLearnerAudio = null;
+    return audio;
   }
 
   close(): void {
@@ -197,6 +215,9 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
     if (!text) return; // empty transcription is dropped silently (spec §7)
     this.emitTurn("learner", text);
     this.history.push({ role: "user", content: text });
+    // The endpoint gate already trimmed the silence, so this span is the
+    // learner's speech and nothing else.
+    this.lastLearnerAudio = { pcm: audio, sampleRate: 16_000 };
 
     // 2. Coach reply from the LLM — one retry, then a visible failure.
     //    Never fabricate a line: a dead coach is a FAILED session, not a

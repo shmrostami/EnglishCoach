@@ -352,3 +352,54 @@ CREATE TABLE difficulty_profiles (
   created_at INTEGER NOT NULL,
   UNIQUE (session_id)
 );
+
+-- The mode a session runs in (design.md §30). The planner picks it from the
+-- learner's difficulty and rotates it, so consecutive sessions are not the
+-- same shape of task.
+CREATE TABLE session_types_history (
+  id TEXT PRIMARY KEY,
+  learner_id TEXT NOT NULL REFERENCES learners(id),
+  session_id TEXT REFERENCES sessions(id),
+  session_type TEXT NOT NULL,
+  cognitive_demand REAL NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+-- The learner's audio, kept only when a pronunciation assessment needs it
+-- (spec §12.1: a pronunciation score requires audio-grounded evidence).
+--
+-- Audio is the most sensitive data the app holds, so it is stored per turn,
+-- with the measurement it produced, and is deleted with the session. Nothing
+-- here is written for a session that did not ask for pronunciation.
+CREATE TABLE audio_evidence (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  utterance_id TEXT REFERENCES utterances(id),
+  speaker TEXT NOT NULL,
+  sample_rate INTEGER NOT NULL,
+  sample_count INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  -- Base64 PCM16, or a path to a stored file. Small turns only: the retention
+  -- policy is "what was scored, and nothing more".
+  pcm_base64 TEXT NOT NULL,
+  -- The acoustic measurements taken from this audio, as JSON.
+  measurements TEXT,
+  created_at INTEGER NOT NULL
+);
+
+-- The pronunciation assessment for a turn (spec §24). Every dimension here
+-- is derived from `audio_evidence`, never from the transcript.
+CREATE TABLE pronunciation_assessments (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  audio_evidence_id TEXT NOT NULL REFERENCES audio_evidence(id),
+  rubric_version TEXT NOT NULL,
+  -- 0..1 per skill, all audio-derived.
+  intelligibility REAL,
+  stress REAL,
+  rhythm REAL,
+  -- How much the measurement could be trusted: more audio, cleaner signal.
+  confidence REAL NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (audio_evidence_id)
+);

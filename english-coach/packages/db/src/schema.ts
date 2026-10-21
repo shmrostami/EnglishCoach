@@ -330,6 +330,43 @@ export const difficultyProfiles = sqliteTable("difficulty_profiles", {
   createdAt: integer("created_at").notNull(),
 }, (t) => ({ uq_difficulty_session: unique().on(t.sessionId) }));
 
+// Which mode a session ran in (design.md §30), so the planner can rotate.
+export const sessionTypesHistory = sqliteTable("session_types_history", {
+  id: text("id").primaryKey(),
+  learnerId: text("learner_id").notNull().references(() => learners.id),
+  sessionId: text("session_id").references(() => sessions.id),
+  sessionType: text("session_type").notNull(),
+  cognitiveDemand: real("cognitive_demand").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+// The learner's audio, kept only for a pronunciation assessment (spec §12.1).
+export const audioEvidence = sqliteTable("audio_evidence", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => sessions.id),
+  utteranceId: text("utterance_id").references(() => utterances.id),
+  speaker: text("speaker").notNull(),
+  sampleRate: integer("sample_rate").notNull(),
+  sampleCount: integer("sample_count").notNull(),
+  durationMs: integer("duration_ms").notNull(),
+  pcmBase64: text("pcm_base64").notNull(),
+  measurements: text("measurements"),
+  createdAt: integer("created_at").notNull(),
+});
+
+// A pronunciation assessment, every value of it derived from audio.
+export const pronunciationAssessments = sqliteTable("pronunciation_assessments", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => sessions.id),
+  audioEvidenceId: text("audio_evidence_id").notNull().references(() => audioEvidence.id),
+  rubricVersion: text("rubric_version").notNull(),
+  intelligibility: real("intelligibility"),
+  stress: real("stress"),
+  rhythm: real("rhythm"),
+  confidence: real("confidence").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (t) => ({ uq_pronunciation_evidence: unique().on(t.audioEvidenceId) }));
+
 export type SkillRow = typeof skills.$inferSelect;
 export type ErrorRow = typeof errorPatterns.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
@@ -351,3 +388,6 @@ export type MilestoneRow = typeof goalMilestones.$inferSelect;
 export type CanonicalVocabRow = typeof vocabularyItemsCanonical.$inferSelect;
 export type VocabStateRow = typeof vocabularyState.$inferSelect;
 export type DifficultyProfileRow = typeof difficultyProfiles.$inferSelect;
+export type SessionTypeRow = typeof sessionTypesHistory.$inferSelect;
+export type AudioEvidenceRow = typeof audioEvidence.$inferSelect;
+export type PronunciationRow = typeof pronunciationAssessments.$inferSelect;

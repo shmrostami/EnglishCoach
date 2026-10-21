@@ -621,6 +621,72 @@ describe("HTTP API", () => {
     await isolated.close();
   });
 
+  it("scores pronunciation from retained audio and leaves it null when there is none", async () => {
+    const fresh = openDb(":memory:");
+    migrate(fresh);
+    ensureSeed(fresh);
+    const svc = new SessionService(db(fresh));
+    const isolated = await buildApp({
+      service: svc, db: db(fresh), registry: new BridgeRegistry(),
+      selectSpeech: () => new MockSpeechProvider({ turns: SCRIPT, autoClose: false }),
+      env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 60_000, OPENAI_API_KEY: undefined },
+      queue: () => {},
+    });
+
+    // A session with NO retained audio: pronunciation must stay null. The
+    // transcript is not a substitute for samples (spec §12.1).
+    const silent = svc.createSession(LEARNER_ID, Date.now());
+    svc.recordUtterance(silent.id, { speaker: "learner", text: "Yesterday I go to work.", startedAt: 0, endedAt: 1000 });
+    fresh.prepare("UPDATE sessions SET metrics=? WHERE id=?").run(JSON.stringify({
+      speakingSeconds: 10, userWordCount: 6, wordsPerMinute: 60, pauseCount: 0,
+      avgPauseMs: 0, longestPauseMs: 0, utteranceCount: 1, avgUtteranceWords: 6,
+    }), silent.id);
+    await runAnalysis({ db: db(fresh), provider: new MockAnalysisProvider(), sessionId: silent.id, now: Date.now() });
+
+    const withoutAudio = fresh.prepare("SELECT pronunciation_score FROM sessions WHERE id=?").get(silent.id) as { pronunciation_score: number | null };
+    expect(withoutAudio.pronunciation_score).toBeNull();
+
+    // A session WITH retained audio: the score comes from the samples.
+    const spoken = svc.createSession(LEARNER_ID, Date.now());
+    svc.recordUtterance(spoken.id, { speaker: "learner", text: "Yesterday I went to the market.", startedAt: 0, endedAt: 3000 });
+    fresh.prepare("UPDATE sessions SET metrics=? WHERE id=?").run(JSON.stringify({
+      speakingSeconds: 3, userWordCount: 7, wordsPerMinute: 140, pauseCount: 0,
+      avgPauseMs: 0, longestPauseMs: 0, utteranceCount: 1, avgUtteranceWords: 7,
+    }), spoken.id);
+
+    // 2 s of synthetic speech: six bursts of a 220 Hz tone with an envelope.
+    const sr = 16000;
+    const samples: number[] = [];
+    for (let s = 0; s < 6; s++) {
+      const len = Math.round(sr * 0.15);
+      for (let i = 0; i < len; i++) {
+        samples.push(0.6 * Math.sin((Math.PI * i) / len) * Math.sin((2 * Math.PI * 220 * i) / sr));
+      }
+      for (let i = 0; i < Math.round(sr * 0.12); i++) samples.push(0);
+    }
+    const pcm = Buffer.alloc(samples.length * 2);
+    samples.forEach((v, i) => pcm.writeInt16LE(Math.round(v * 32767), i * 2));
+    svc.recordAudioEvidence({
+      sessionId: spoken.id, utteranceId: null, pcm, sampleRate: sr, now: Date.now(),
+    });
+
+    await runAnalysis({ db: db(fresh), provider: new MockAnalysisProvider(), sessionId: spoken.id, now: Date.now() });
+
+    const withAudio = fresh.prepare("SELECT pronunciation_score FROM sessions WHERE id=?").get(spoken.id) as { pronunciation_score: number | null };
+    expect(withAudio.pronunciation_score).not.toBeNull();
+    expect(withAudio.pronunciation_score!).toBeGreaterThanOrEqual(0);
+    expect(withAudio.pronunciation_score!).toBeLessThanOrEqual(1);
+
+    // The assessment is stored with its rubric version and its evidence.
+    const row = fresh.prepare(
+      "SELECT rubric_version, confidence FROM pronunciation_assessments WHERE session_id=?",
+    ).get(spoken.id) as { rubric_version: string; confidence: number };
+    expect(row.rubric_version).toBe("acoustic-prosody-v1");
+    expect(row.confidence).toBeGreaterThan(0);
+
+    await isolated.close();
+  });
+
   it("re-enqueues a failed analysis job and refuses an already-analyzed session", async () => {
     const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
     // A failed job row exists for this session (the runner exhausted its attempts).

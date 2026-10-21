@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, and, asc } from "drizzle-orm";
 import {
-  sessions, skills, errorPatterns, learningPlans, goalsTable,
+  sessions, skills, errorPatterns, learningPlans, goalsTable, sessionTypesHistory,
   type DrizzleDb,
 } from "@ec/db";
 import type { PlanDraft, SessionAnalysis } from "@ec/domain";
@@ -9,6 +9,7 @@ import { PlanDraftSchema } from "@ec/domain";
 import type { AnalysisProvider } from "@ec/openai";
 import {
   adjustDifficulty, recentPerformance,
+  selectSessionType, renderSessionPrompt, type SessionType,
   effectiveFrequency,
   selectTargets, chooseIntervention, goalRelevanceFor,
   DEFAULT_NO_HISTORY,
@@ -101,6 +102,22 @@ export async function runPlanner(opts: {
 
   const learnerContext = buildLearnerContext(d, session.learnerId, sessionId, now);
 
+  // The mode of the session (design.md §30): chosen from the learner's
+  // difficulty and rotated, so three sessions in a row are not the same task.
+  const recentTypes = d.select().from(sessionTypesHistory)
+    .where(eq(sessionTypesHistory.learnerId, session.learnerId))
+    .orderBy(asc(sessionTypesHistory.createdAt)).all()
+    .map((r) => r.sessionType as SessionType);
+  const typeSpec = selectSessionType({ difficulty: newDifficulty, recentTypes });
+  d.insert(sessionTypesHistory).values({
+    id: `stype-${randomUUID()}`,
+    learnerId: session.learnerId,
+    sessionId: null,
+    sessionType: typeSpec.type,
+    cognitiveDemand: typeSpec.cognitiveDemand,
+    createdAt: now,
+  }).run();
+
   const draftRaw = await provider.plan({
     difficulty: newDifficulty,
     candidates: candidates.map((c) => c.skill),
@@ -127,9 +144,14 @@ export async function runPlanner(opts: {
     difficulty: newDifficulty,
     primaryTargets: JSON.stringify(primary.map((t) => t.skill)),
     secondaryTargets: JSON.stringify(secondary.map((t) => t.skill)),
-    interventionType: primary[0] ? interventions.get(primary[0].skill) : null,
-    topic: draft.topic,
-    reasoning: draft.reason,
+    // The mode's own intervention wins when the engine has no target: the mode
+    // is the kind of task, and the mode knows how it should be practised.
+    interventionType: primary[0] ? interventions.get(primary[0].skill) : typeSpec.intervention,
+    // The topic is rendered through the mode's template, so the learner is
+    // told what KIND of task this is — a debate is not a story, and the
+    // cognitive demand is what makes it harder.
+    topic: renderSessionPrompt(typeSpec, draft.topic),
+    reasoning: `${draft.reason} (mode: ${typeSpec.label})`,
     status: "active",
     createdAt: now,
   }).run();

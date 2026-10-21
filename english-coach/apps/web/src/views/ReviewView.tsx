@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type FeedbackResponse, type SessionFeedback } from "../api/client.js";
+import {
+  api, type FeedbackResponse, type SessionFeedback, type PronunciationAssessment,
+} from "../api/client.js";
 import { ReviewSections } from "./ReviewSections.js";
 
 const DIMENSION_LABEL: Record<string, string> = {
@@ -22,6 +24,7 @@ export function ReviewView() {
   const [data, setData] = useState<FeedbackResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [pronunciation, setPronunciation] = useState<PronunciationAssessment | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,7 +38,16 @@ export function ReviewView() {
         if (cancelled) return;
         if (!id) { setData(null); return; }
         const res = await api.feedback(id);
-        if (!cancelled) setData(res);
+        if (cancelled) return;
+        setData(res);
+        // The pronunciation assessment exists only when there was audio to
+        // measure, so a null here is the honest "not assessed" answer.
+        try {
+          const p = await api.pronunciation(id);
+          if (!cancelled) setPronunciation(p.pronunciation);
+        } catch {
+          if (!cancelled) setPronunciation(null);
+        }
       } catch {
         if (!cancelled) setLoadFailed(true);
       } finally {
@@ -81,7 +93,7 @@ export function ReviewView() {
     );
   }
 
-  return <FeedbackBody fb={data.feedback} onAction={(c, action) => {
+  return <FeedbackBody fb={data.feedback} pronunciation={pronunciation} onAction={(c, action) => {
     // Optimistic: the review is a list the learner is working through, and a
     // button that waits on a round trip feels broken. A failure reverts it.
     setData((d) => d?.feedback ? {
@@ -103,9 +115,10 @@ export function ReviewView() {
   }} />;
 }
 
-function FeedbackBody({ fb, onAction }: {
+function FeedbackBody({ fb, onAction, pronunciation }: {
   fb: SessionFeedback;
   onAction: (c: SessionFeedback["corrections"][number], action: "accepted" | "dismissed") => void;
+  pronunciation: PronunciationAssessment | null;
 }) {
   const dims = Object.keys(fb.scores);
   return (
@@ -136,6 +149,26 @@ function FeedbackBody({ fb, onAction }: {
           </p>
         )}
       </div>
+
+      {pronunciation && (
+        <div className="section">
+          <h2 className="section__title">How it sounded</h2>
+          <div className="ec-review__dims">
+            {(["intelligibility", "stress", "rhythm"] as const).map((key) => (
+              <div key={key} className="ec-review__dim">
+                <span className="ec-review__dim-name">{key}</span>
+                <span className="ec-review__dim-value">
+                  {pronunciation[key] == null ? "not assessed" : formatPct(pronunciation[key]!)}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="ec-review__note">
+            Measured from your audio ({pronunciation.rubricVersion}), {formatPct(pronunciation.confidence)} confidence.
+            This is a prosody measurement, not a phoneme score.
+          </p>
+        </div>
+      )}
 
       {fb.strengths.length > 0 && (
         <div className="section">
