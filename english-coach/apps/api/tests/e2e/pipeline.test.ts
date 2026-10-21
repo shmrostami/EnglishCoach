@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq, and } from "drizzle-orm";
 import {
   openDb, db, migrate, ensureSeed, sessions, skills, errorPatterns,
-  learningPlans, jobs,
+  learningPlans, jobs, correctedSentences,
 } from "@ec/db";
 import type { DrizzleDb } from "@ec/db";
 import { LEARNER_ID } from "@ec/domain";
@@ -127,5 +127,17 @@ describe("full pipeline (mock provider, spec 11.3)", () => {
 
     const sessionRow = d.select().from(sessions).where(eq(sessions.id, s.id)).all()[0];
     expect(sessionRow.status).toBe("COMPLETED");
+
+    // Feedback is persisted, not only computed on read (spec §11.3).
+    const corrections = d.select().from(correctedSentences)
+      .where(eq(correctedSentences.sessionId, s.id)).all();
+    expect(corrections.length).toBeGreaterThan(0);
+    expect(corrections[0].suggested).toContain("went");
+    expect(corrections[0].learnerAction).toBe("pending");
+
+    // A re-run of the same analysis must not duplicate them (spec §3 principle 6).
+    await runAnalysis({ db: d, provider: new MockAnalysisProvider(), sessionId: s.id, now: Date.now() });
+    expect(d.select().from(correctedSentences)
+      .where(eq(correctedSentences.sessionId, s.id)).all()).toHaveLength(corrections.length);
   }, 15_000);
 });

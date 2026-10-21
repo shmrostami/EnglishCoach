@@ -165,3 +165,19 @@ CREATE TABLE job_attempts (
   started_at INTEGER NOT NULL,
   finished_at INTEGER
 );
+
+-- Post-session corrections (spec §5 Phase 1, §11.3). Derived from the stored
+-- analysis, so a retried analysis writes the same rows; `learner_action` is
+-- persisted so a review survives leaving the session screen.
+CREATE TABLE corrected_sentences (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  original TEXT NOT NULL,
+  suggested TEXT,
+  explanation TEXT,
+  skill_code TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  learner_action TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER NOT NULL
+);

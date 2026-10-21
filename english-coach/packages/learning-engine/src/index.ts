@@ -4,3 +4,4 @@ export * from "./errors.js";
 export * from "./difficulty.js";
 export * from "./prioritization.js";
 export * from "./planning.js";
+export * from "./feedback.js";

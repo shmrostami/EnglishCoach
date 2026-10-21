@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { createCapture, type Capture } from "../audio/capture.js";
 import { createPlayer, type Player } from "../audio/player.js";
@@ -36,6 +37,10 @@ export function SessionView() {
   const [muted, setMuted] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscript());
   const [note, setNote] = useState("");
+  // The session that just ended, kept so we can link to its review. It is
+  // cleared when the next session starts, so the link never points at an old
+  // session while a new one is live.
+  const [reviewId, setReviewId] = useState<string | null>(null);
   const [seconds, setSeconds] = useState(0);
   const socketRef = useRef<{ sendControl: (a: "start" | "end" | "mute" | "unmute") => void; quiet: () => void; teardown: () => void } | null>(null);
   const ended = useRef(false); // this session already ended (user- or server-initiated)
@@ -62,6 +67,7 @@ export function SessionView() {
   async function start() {
     ended.current = false;
     setNote("");
+    setReviewId(null);
     setSeconds(0);
     setMuted(false);
     startTs.current = Date.now();
@@ -108,7 +114,7 @@ export function SessionView() {
         else if (m.t === "transcript") setTranscript((s) => applyTranscript(s, m));
         else if (m.t === "state") setState(m.state);
         else if (m.t === "intervention") setNote(`${m.kind === "micro_coach" ? "micro-correction" : m.kind} — ${m.skill}`);
-        else if (m.t === "session_ended") { ended.current = true; setState(m.state); if (m.reason) setNote(`Session ended: ${m.reason}`); setSessionId(null); stopper.teardown(); }
+        else if (m.t === "session_ended") { ended.current = true; setState(m.state); if (m.reason) setNote(`Session ended: ${m.reason}`); setReviewId(created.sessionId); setSessionId(null); stopper.teardown(); }
       },
       onClose: (reason) => { if (!live()) return; if (!ended.current) setState(`ended:${reason}`); setSessionId(null); setNote(`Connection lost: ${reason}`); stopper.teardown(); },
     });
@@ -145,6 +151,7 @@ export function SessionView() {
     const stopper = socketRef.current;
     if (!stopper || ended.current || !sessionId) return;
     ended.current = true;
+    setReviewId(sessionId); // the review link outlives the live session
     setSessionId(null); // a new session can start while this one winds down
     stopper.sendControl("end");
     stopper.quiet(); // silence the mic + playback now; the server closes the socket
@@ -190,6 +197,11 @@ export function SessionView() {
         </div>
 
         {note && <p className="ec-intervention">{note}</p>}
+        {reviewId && !isLive && (
+          <p className="ec-reviewlink">
+            <Link className="ec-btn" to={`/review/${reviewId}`}>Review this session</Link>
+          </p>
+        )}
       </div>
 
       <div className="ec-transcript" ref={transcriptRef}>

@@ -101,6 +101,36 @@ export interface SessionRecord {
   metrics: SessionMetrics | null;
 }
 
+/** What the learner did with a correction. Stored so review survives a reload. */
+export type LearnerAction = "pending" | "accepted" | "dismissed";
+
+export interface CorrectedSentence {
+  id: string;
+  original: string;
+  /** null when no grounded replacement could be derived — never invented. */
+  suggested: string | null;
+  explanation: string;
+  skill: string;
+  /** The learner's own words the correction is drawn from. */
+  evidence: string;
+  confidence: number;
+  learnerAction: LearnerAction;
+}
+
+/** The reviewable result of one analysed session (spec §11.3). */
+export interface SessionFeedback {
+  sessionId: string;
+  topic: string;
+  startedAt: number;
+  scores: Scores;
+  /** Dimensions the analysis could not evidence — shown as "not assessed". */
+  notAssessed: (keyof Scores)[];
+  strengths: SkillEvidence[];
+  corrections: CorrectedSentence[];
+  vocabulary: string[];
+  next: { topic: string | null; targets: string[]; reason: string | null } | null;
+}
+
 export interface PlanDraft {
   topic: string;
   candidateSkills: string[];

@@ -163,6 +163,21 @@ export const jobAttempts = sqliteTable("job_attempts", {
   finishedAt: integer("finished_at"),
 });
 
+// Post-session corrections (spec §5 Phase 1, §11.3), derived from the stored
+// analysis so a retried analysis writes the same rows.
+export const correctedSentences = sqliteTable("corrected_sentences", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => sessions.id),
+  original: text("original").notNull(),
+  suggested: text("suggested"),
+  explanation: text("explanation"),
+  skillCode: text("skill_code").notNull(),
+  evidence: text("evidence").notNull(),
+  confidence: real("confidence").notNull(),
+  learnerAction: text("learner_action").notNull().default("pending"),
+  createdAt: integer("created_at").notNull(),
+});
+
 export type SkillRow = typeof skills.$inferSelect;
 export type ErrorRow = typeof errorPatterns.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
@@ -173,3 +188,4 @@ export type UtteranceRow = typeof utterances.$inferSelect;
 export type ObservationRow = typeof observations.$inferSelect;
 export type InterventionRow = typeof interventions.$inferSelect;
 export type JobAttemptRow = typeof jobAttempts.$inferSelect;
+export type CorrectedSentenceRow = typeof correctedSentences.$inferSelect;

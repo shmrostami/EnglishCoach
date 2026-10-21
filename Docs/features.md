@@ -4,7 +4,8 @@
 **Source of truth:** the code under `english-coach/`, read directly. Where this disagrees with
 `Docs/design.md`, the code wins and the gap is listed in §9.
 **Last verified against:** `main` + the Phase 0 stabilization slice
-(`Docs/plans/2026-10-20-phase-0-stabilization.md`).
+(`Docs/plans/2026-10-20-phase-0-stabilization.md`) and the post-session feedback slice
+(`Docs/plans/2026-10-21-post-session-feedback.md`).
 
 ---
 
@@ -27,16 +28,20 @@ correction style, 15-minute sessions) and three active goals on every start, ide
 
 ## 2. Web routes
 
-Three routes, each under its own error boundary (`apps/web/src/App.tsx`).
+Five routes, each under its own error boundary (`apps/web/src/App.tsx`).
 
 | Route | File | Capability |
 |---|---|---|
 | `/` | `apps/web/src/views/SessionView.tsx` | Start speaking → creates a session, opens the WS, requests the mic, streams PCM, plays coach audio. Live transcript (learner/coach bubbles, deduped by `seq`, auto-scroll), state chip, on-air timer, intervention note, connection chip (connecting / connected / reconnecting / disconnected), Mute/Unmute button, End. Mic-denied keeps audio and transcript and shows a note. |
 | `/dashboard` | `apps/web/src/views/DashboardView.tsx` | CEFR ladder A2→C1 with "you are here"; estimated level + confidence; next-session plan (topic, primary/secondary target chips, reasoning) or an empty-plan card; skill mastery grouped by family with progress bar, trend, observation count; last-10-sessions table (date, topic, the six dimension scores with "not assessed" for an unmeasured one, overall, overall delta). |
+| `/review` | `apps/web/src/views/ReviewView.tsx` | Post-session review of the newest completed session: the six dimension scores ("not assessed" for an unmeasured one), strengths, up to three corrections (original → suggested + explanation), vocabulary to keep, and the next session's topic/targets/reason. Handles loading, no-session, still-analysing and failed-analysis states. |
+| `/review/:sessionId` | same | The same review for a named session, so it survives leaving the session screen. |
 | `/goals` | `apps/web/src/views/GoalsView.tsx` | List goals, add a goal (free-text `type` + description, priority forced to 0.5), mark active goal completed. |
 
-Not present: settings, session history browser, profile/login, error-pattern view. The
-transcript exists only while a session is live.
+Not present: settings, session history browser, profile/login, error-pattern view, and the
+learner's *action* on a correction (accept/dismiss) — the column exists, the UI does not.
+The live transcript exists only while a session is live; the review shows the analysis, not
+the transcript.
 
 ---
 
@@ -118,6 +123,7 @@ All under `apps/api/src/routes/`. Any learner other than `learner-1` returns 404
 | POST | `/v1/sessions/:id/end` | Ends once (409 on repeat), → `CLOSING`→`ANALYZING`, computes metrics, enqueues `analyze`, tears down the live bridge and releases the cached provider. |
 | POST | `/v1/sessions/:id/analyze` | Re-queues a failed analysis. Resets the existing job row (`UNIQUE(session_id,type)` makes a fresh insert impossible) or enqueues one when there is none. `409` for an already-analyzed session. Returns `{state:"QUEUED", sessionId}`. |
 | GET | `/v1/jobs/failed` | Failed jobs, newest first, each with its attempt history (`attempt`, `status`, `errorClass`, `error`, timestamps). |
+| GET | `/v1/sessions/:id/feedback` | Persisted post-session feedback: scores, `notAssessed` dimensions, strengths, stored corrections (with `learnerAction`), vocabulary, and the active plan's topic/targets/reason as `next`. A session that is not analysed yet answers `200` with `feedback: null` and its `state`; unknown session is `404`. |
 | GET | `/v1/learners/:id` | Language profile, target/estimated level + confidence, correction style, preferred minutes. |
 | GET | `/v1/learners/:id/skills` | Raw skill rows: code, mastery, confidence, trend, observation count. |
 | GET | `/v1/learners/:id/learning-plan` | Newest active plan (targets parsed defensively from JSON). **No plan → `200` with a JSON `null` body**, not a 404 — a learner with no plan is a valid empty state. |
@@ -151,7 +157,9 @@ backoff `min(30 s, 2^attempts · 5 s)`, idempotent enqueue via a unique (session
 6. Apply memory deterministically (no LLM): skill EMA, error patterns (confidence > 0.8),
    error retirement, vocabulary upsert, `nextReviewAt`.
 7. Persist analysis observations.
-8. Enqueue `plan_next`.
+8. Persist `corrected_sentences` rows from `deriveFeedback` (skipped when the session already
+   has any, so a retry cannot duplicate them — §3 principle 6).
+9. Enqueue `plan_next`.
 
 A job that exhausts its 3 attempts is recorded attempt-by-attempt in `job_attempts`
 (with an error class: `validation` / `type` / `provider` / `unknown`), and the session
@@ -193,6 +201,7 @@ Pure functions, no I/O — `packages/learning-engine/src/`, all exported from `i
 | `errors.ts` | `upsertErrorInput`, `effectiveFrequency`, `isRecurring`, `shouldRetire` | recurrence counting at confidence ≥ .8, exponential decay with a 30-day half-life, retirement at mastery ≥ .8 or effective frequency < 1 |
 | `difficulty.ts` | `adjustDifficulty`, `recentPerformance` | +.05 at ≥ .85, +.02 at ≥ .75, 0 at ≥ .55, else −.05; clamped .15–.95 |
 | `prioritization.ts` | `calculatePriority`, `rankCandidates`, `goalRelevanceFor`, `DEFAULT_NO_HISTORY` | six terms: recurrence .25, severity .20, goal relevance .20, communicative impact .15, readiness .10, forgetting risk .10 |
+| `feedback.ts` | `deriveFeedback` | review shape from a stored analysis: unassessed dimensions, top-3 strengths by confidence, top-3 corrections by severity (a `suggested` sentence only when the wrong form actually occurs in the quoted evidence, else `null`), deduped vocabulary |
 | `planning.ts` | `selectTargets`, `chooseIntervention`, `estimateLevel` | drop mastery ≥ .8, take 2 primary + 1 secondary; intervention by family; CEFR banding A2/B1/B1+/B2+/C1 with confidence `clamp(.3 + .05·sessions, .3, .95)` |
 
 **Skill codes** — `packages/domain/src/codes.ts`, 5 families / 20 codes:
@@ -265,7 +274,8 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 | §11 adaptive difficulty | **implemented** | `difficulty.ts`; no hysteresis. |
 | Spaced vocabulary review | **not implemented** | `nextReviewAt` columns are never written or read for scheduling. |
 | Goal decomposition | **not implemented** | Goals are flat text rows. |
-| Dashboard recurring errors | **not implemented** | `error_patterns` is written; there is no read endpoint or UI. |
+| Dashboard recurring errors | **not implemented** | `error_patterns` is written; there is no read endpoint or UI (backlog item 8). |
+| Correction accept/dismiss | **partial** | `corrected_sentences.learner_action` exists and defaults to `pending`; no route or control changes it yet. |
 | Level history / per-dimension trends | **not implemented** | `/progress` returns the last 10 sessions only. |
 | §25/§32 V2–V4 roadmap | **not implemented** | Personalized curriculum, teacher dashboard, advanced pronunciation. |
 | Redis / object storage / audio recordings / WebRTC | **out of scope by design** | Spec §1 non-goals. |
@@ -299,8 +309,11 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 
 ## 11. Tests
 
-`pnpm test` — 31 files, 184 tests, all passing (vitest). Includes an end-to-end pipeline test
+`pnpm test` — 33 files, 197 tests, all passing (vitest). Includes an end-to-end pipeline test
 (`apps/api/tests/e2e/pipeline.test.ts`) proving session → utterances → analysis → memory →
 plan → next-session targets, and a real-Python sidecar test.
 
 Must run on Node 22: `better-sqlite3` is compiled for Node 22 and Node 24 refuses to load it.
+`packages/openai/src/local/voice_sidecar.test.ts` loads Whisper in a real Python child; on a
+machine short of free RAM it fails with `mkl_malloc: failed to allocate memory` — an
+environment failure, not a code one. Run it on its own when the box is busy.

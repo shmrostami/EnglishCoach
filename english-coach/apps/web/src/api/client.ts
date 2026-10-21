@@ -40,6 +40,36 @@ export interface Plan {
   createdAt: number;
 }
 
+export interface Correction {
+  id: string;
+  original: string;
+  suggested: string | null;
+  explanation: string;
+  skill: string;
+  evidence: string;
+  confidence: number;
+  learnerAction: "pending" | "accepted" | "dismissed";
+}
+
+export interface SessionFeedback {
+  sessionId: string;
+  topic: string;
+  startedAt: number;
+  scores: Record<string, number | null>;
+  notAssessed: string[];
+  strengths: { skill: string; evidence: string; confidence: number }[];
+  corrections: Correction[];
+  vocabulary: string[];
+  next: { topic: string | null; targets: string[]; reason: string | null } | null;
+}
+
+/** `feedback` is null until the analysis finishes (or if it failed). */
+export interface FeedbackResponse {
+  sessionId: string;
+  state: string;
+  feedback: SessionFeedback | null;
+}
+
 export const api = {
   createSession: () => http<{ sessionId: string; topic: string; difficulty: number; state: string }>(
     `/v1/learners/${LEARNER_ID}/sessions`, { method: "POST" }),
@@ -49,6 +79,7 @@ export const api = {
   session: (id: string) => http<SessionDetail>(`/v1/sessions/${id}`),
   endSession: (id: string) => http<{ state: string }>(`/v1/sessions/${id}/end`, { method: "POST" }),
   retryAnalysis: (id: string) => http<{ state: string; sessionId: string }>(`/v1/sessions/${id}/analyze`, { method: "POST" }),
+  feedback: (id: string) => http<FeedbackResponse>(`/v1/sessions/${id}/feedback`),
   profile: () => http<Record<string, unknown>>(`/v1/learners/${LEARNER_ID}`),
   skills: () => http<Array<Record<string, unknown>>>(`/v1/learners/${LEARNER_ID}/skills`),
   // No active plan is a valid empty state: the server answers 200 with a JSON

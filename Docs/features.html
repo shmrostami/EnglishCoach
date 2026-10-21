@@ -327,12 +327,12 @@
   <p class="lede">What the app actually does, where each piece lives, and which parts of the design document never made it into code. Built by reading the source, not the docs.</p>
 
   <div class="stats">
-    <div class="stat"><b>3</b><span>web views</span></div>
-    <div class="stat"><b>13</b><span>HTTP + WS routes</span></div>
+    <div class="stat"><b>5</b><span>web routes</span></div>
+    <div class="stat"><b>14</b><span>HTTP + WS routes</span></div>
     <div class="stat"><b>10</b><span>session states</span></div>
     <div class="stat"><b>20</b><span>skill codes</span></div>
     <div class="stat"><b>3</b><span>provider modes</span></div>
-    <div class="stat"><b>184</b><span>tests, 31 files</span></div>
+    <div class="stat"><b>197</b><span>tests, 33 files</span></div>
   </div>
 
   <section>
@@ -381,7 +381,7 @@
 
   <section>
     <h2>Screens</h2>
-    <p class="note">Three routes, each under its own error boundary. No settings, no history browser, no profile screen, no error-pattern view — the transcript exists only while a session is live.</p>
+    <p class="note">Five routes, each under its own error boundary. No settings, no history browser, no profile screen, no error-pattern view, and no control to accept or dismiss a correction — the transcript exists only while a session is live.</p>
     <div class="grid2">
       <div class="card">
         <h3><code>/</code> Session</h3>
@@ -390,6 +390,10 @@
       <div class="card">
         <h3><code>/dashboard</code></h3>
         <p>CEFR ladder, estimated level with confidence, next-session plan (or an empty-plan card), skill mastery by family, last ten sessions with per-dimension scores.</p>
+      </div>
+      <div class="card">
+        <h3><code>/review</code> and <code>/review/:sessionId</code></h3>
+        <p>The newest completed session, or a named one: dimension scores with "not assessed" for an unmeasured dimension, strengths, up to three corrections (original → suggested, with an explanation), vocabulary to keep, and the next session's topic, targets and reason. Handles loading, no-session, still-analysing and failed-analysis states.</p>
       </div>
       <div class="card">
         <h3><code>/goals</code></h3>
@@ -413,6 +417,7 @@
           <tr><td><code>GET /v1/sessions/:id</code></td><td>Session plus transcript plus the persisted scores, analysis and metrics. An unassessed dimension is <code>null</code>, not zero.</td></tr>
           <tr><td><code>POST /v1/sessions/:id/end</code></td><td>Ends once, computes metrics, enqueues analysis, tears down the live bridge and releases the cached provider.</td></tr>
           <tr><td><code>POST /v1/sessions/:id/analyze</code></td><td>Re-queues a failed analysis; 409 for an already-analyzed session.</td></tr>
+          <tr><td><code>GET /v1/sessions/:id/feedback</code></td><td>Persisted post-session review: scores, unassessed dimensions, strengths, stored corrections with their learner action, vocabulary, and the next plan's topic, targets and reason. Not analysed yet → <code>200</code> with <code>feedback: null</code> and the session state.</td></tr>
           <tr><td><code>GET /v1/jobs/failed</code></td><td>Failed jobs with their attempt history and error class.</td></tr>
           <tr><td><code>GET /v1/learners/:id</code></td><td>Profile: languages, target and estimated level, correction style.</td></tr>
           <tr><td><code>GET …/skills</code></td><td>Raw skill rows with mastery, confidence, trend.</td></tr>
@@ -429,14 +434,14 @@
 
   <section>
     <h2>After the session ends</h2>
-    <p class="note">Two background jobs, invisible in the UI. The learning engine — not the model — decides what to work on next.</p>
+    <p class="note">Two background jobs, visible only through the review page and the dashboard. The learning engine — not the model — decides what to work on next.</p>
     <div class="tablewrap">
       <table>
         <thead>
           <tr><th>Job</th><th>Produces</th><th>Where</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>analyze</code></td><td>Six dimension scores, observations, skill mastery updates, error patterns, vocabulary, level estimate. Session becomes completed. Pronunciation stays <code>null</code> unless the provider declares audio-grounded evidence.</td><td class="path">apps/api/src/workers/analysis.ts</td></tr>
+          <tr><td><code>analyze</code></td><td>Six dimension scores, observations, skill mastery updates, error patterns, vocabulary, level estimate, and the reviewable <code>corrected_sentences</code> rows (skipped when the session already has them, so a retry cannot duplicate). Session becomes completed. Pronunciation stays <code>null</code> unless the provider declares audio-grounded evidence.</td><td class="path">apps/api/src/workers/analysis.ts</td></tr>
           <tr><td><code>plan_next</code></td><td>Adjusted difficulty, primary and secondary targets, topic. The LLM picks the topic; the engine picks the targets.</td><td class="path">apps/api/src/workers/planner.ts</td></tr>
           <tr><td>metrics</td><td>Words per minute, pauses over 800 ms, speaking seconds.</td><td class="path">apps/api/src/metrics.ts</td></tr>
           <tr><td>runner</td><td>One-second poll, three attempts, exponential backoff, idempotent enqueue. Every attempt is recorded with an error class; a job that gives up moves its session to failed.</td><td class="path">apps/api/src/workers/jobs.ts</td></tr>
@@ -461,6 +466,7 @@
           <tr><td><code>difficulty</code></td><td>±0.02 to ±0.05 steps clamped between 0.15 and 0.95.</td></tr>
           <tr><td><code>prioritization</code></td><td>Six-term priority: recurrence, severity, goal relevance, communicative impact, readiness, forgetting risk.</td></tr>
           <tr><td><code>planning</code></td><td>Target selection, intervention choice, CEFR banding.</td></tr>
+          <tr><td><code>feedback</code></td><td>The review shape from a stored analysis: unassessed dimensions, top-three strengths, top-three corrections, deduped vocabulary. A suggested sentence is produced only when the wrong form actually occurs in the quoted evidence — otherwise it stays <code>null</code> rather than being invented.</td></tr>
         </tbody>
       </table>
     </div>
@@ -538,11 +544,13 @@
       <li><span class="chip warn">gap</span> &nbsp;The retry and job-inspection routes exist but nothing in the web client calls them yet — recovery is an API-only path.</li>
       <li><span class="chip warn">gap</span> &nbsp;The client retries a reconnect even when the server has already rejected the session (4000/4001), so a dead session burns the whole attempt budget before the UI gives up.</li>
       <li><span class="chip warn">gap</span> &nbsp;The start control the client sends is ignored server-side.</li>
+      <li><span class="chip warn">gap</span> &nbsp;A correction's learner action is persisted but nothing sets it — there is no accept/dismiss control or route yet.</li>
+      <li><span class="chip warn">gap</span> &nbsp;There is no read endpoint for error patterns, so the review shows corrections from one session, not the recurring patterns behind them.</li>
     </ul>
   </section>
 
   <footer>
-    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization slice. Paths are relative to the repository root. Test count reflects a green run of the full suite.
+    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization and post-session feedback slices. Paths are relative to the repository root. Test count reflects a green run of the full suite.
   </footer>
 
 </div>

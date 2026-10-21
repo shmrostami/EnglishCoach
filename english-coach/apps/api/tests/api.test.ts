@@ -145,6 +145,61 @@ describe("HTTP API", () => {
     expect(res.body).toBe("null");
   });
 
+  it("returns 404 feedback for an unknown session and null feedback before analysis", async () => {
+    const missing = await app.inject({ method: "GET", url: "/v1/sessions/sess-nope/feedback" });
+    expect(missing.statusCode).toBe(404);
+
+    const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
+    // A session that has not finished analysing is a valid state, not an error.
+    const pending = await app.inject({ method: "GET", url: `/v1/sessions/${created.sessionId}/feedback` });
+    expect(pending.statusCode).toBe(200);
+    expect(pending.json()).toMatchObject({ sessionId: created.sessionId, feedback: null });
+  });
+
+  it("returns the persisted review: scores, not-assessed dims, corrections and the next plan", async () => {
+    const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
+    const analysis = {
+      scores: { fluency: 0.7, grammar: 0.6, vocabulary: 0.8, pronunciation: null, coherence: 0.55, interaction: 0.9 },
+      observations: [{
+        type: "language_error", skill: "grammar.past_tense", evidence: "Yesterday I go to work",
+        actual: "go", expected: "went", severity: 0.6, confidence: 0.9,
+      }],
+      recurring_errors: [], strengths: [], recommended_targets: [],
+    };
+    sqlite.prepare(
+      "UPDATE sessions SET status='COMPLETED', fluency_score=?, grammar_score=?, vocabulary_score=?, pronunciation_score=NULL, coherence_score=?, interaction_score=?, overall_score=0.7, analysis=?, started_at=? WHERE id=?",
+    ).run(0.7, 0.6, 0.8, 0.55, 0.9, JSON.stringify(analysis), Date.now(), created.sessionId);
+    // A correction row as the analysis worker would have written it.
+    sqlite.prepare(
+      "INSERT INTO corrected_sentences (id, session_id, original, suggested, explanation, skill_code, evidence, confidence, learner_action, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    ).run("corr-1", created.sessionId, "Yesterday I go to work", "Yesterday I went to work",
+      'Replace "go" with "went" here.', "grammar.past_tense", "Yesterday I go to work", 0.9, "pending", Date.now());
+    sqlite.prepare(
+      "INSERT INTO learning_plans (id, learner_id, difficulty, primary_targets, secondary_targets, topic, reasoning, status, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+    ).run("plan-fb", LEARNER_ID, 0.45, '["grammar.past_tense"]', '["vocabulary.precision"]', "past weekends", "recurring past-tense errors", "active", Date.now());
+
+    const res = await app.inject({ method: "GET", url: `/v1/sessions/${created.sessionId}/feedback` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      state: string;
+      feedback: {
+        scores: { pronunciation: number | null };
+        notAssessed: string[];
+        corrections: { id: string; suggested: string | null; learnerAction: string; skill: string }[];
+        next: { topic: string; targets: string[] } | null;
+      };
+    };
+    expect(body.state).toBe("COMPLETED");
+    // Not assessed → named, never scored 0 (spec §12.1).
+    expect(body.feedback.scores.pronunciation).toBeNull();
+    expect(body.feedback.notAssessed).toEqual(["pronunciation"]);
+    // Read back from the row, so the learner action survives a reload.
+    expect(body.feedback.corrections[0]).toMatchObject({
+      id: "corr-1", suggested: "Yesterday I went to work", learnerAction: "pending", skill: "grammar.past_tense",
+    });
+    expect(body.feedback.next?.targets).toContain("grammar.past_tense");
+  });
+
   it("re-enqueues a failed analysis job and refuses an already-analyzed session", async () => {
     const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
     // A failed job row exists for this session (the runner exhausted its attempts).

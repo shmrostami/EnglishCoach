@@ -57,6 +57,31 @@ export const LearnerContextSchema = z.object({
   currentSessionTargets: z.array(skillCode),
 });
 
+export const LearnerActionSchema = z.enum(["pending", "accepted", "dismissed"]);
+
+export const CorrectedSentenceSchema = z.object({
+  id: z.string(),
+  original: z.string(),
+  suggested: z.string().nullable(),
+  explanation: z.string(),
+  skill: skillCode,
+  evidence: z.string(),
+  confidence: unit,
+  learnerAction: LearnerActionSchema,
+});
+
+export const SessionFeedbackSchema = z.object({
+  sessionId: z.string(),
+  topic: z.string(),
+  startedAt: z.number(),
+  scores: ScoresSchema,
+  notAssessed: z.array(z.enum(["fluency", "grammar", "vocabulary", "pronunciation", "coherence", "interaction"])),
+  strengths: z.array(z.object({ skill: skillCode, evidence: z.string(), confidence: unit })),
+  corrections: z.array(CorrectedSentenceSchema),
+  vocabulary: z.array(z.string()),
+  next: z.object({ topic: z.string().nullable(), targets: z.array(skillCode), reason: z.string().nullable() }).nullable(),
+});
+
 export const PlanDraftSchema = z.object({
   topic: z.string(),
   candidateSkills: z.array(skillCode),

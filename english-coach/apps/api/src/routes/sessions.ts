@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
-import { jobs, jobAttempts, type DrizzleDb } from "@ec/db";
+import {
+  jobs, jobAttempts, sessions, learningPlans, correctedSentences, tryParseJson, type DrizzleDb,
+} from "@ec/db";
+import { deriveFeedback } from "@ec/learning-engine";
 import type { SessionService } from "../services/session.js";
 import type { BridgeRegistry } from "../realtime/bridge.js";
 
@@ -56,6 +59,57 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
       queue("analyze", id);
     }
     return { state: "QUEUED", sessionId: id };
+  });
+
+  /**
+   * Post-session feedback (spec §10.1, §11.3). A session that has not been
+   * analysed yet is a valid state, not an error: it answers `feedback: null`
+   * with the session state so the client can say "still running".
+   */
+  app.get("/v1/sessions/:id/feedback", (req, reply) => {
+    const { id } = req.params as { id: string };
+    const record = service.getRecord(id);
+    if (!record) return reply.code(404).send({ error: "unknown session" });
+    if (!record.scores || !record.analysis) {
+      return { sessionId: id, state: record.state, feedback: null };
+    }
+    const draft = deriveFeedback(record.analysis);
+    const learnerId = db.select({ learnerId: sessions.learnerId }).from(sessions)
+      .where(eq(sessions.id, id)).all()[0].learnerId;
+    const next = db.select().from(learningPlans)
+      .where(and(eq(learningPlans.learnerId, learnerId), eq(learningPlans.status, "active")))
+      .orderBy(desc(learningPlans.createdAt)).all()[0];
+
+    return {
+      sessionId: id,
+      state: record.state,
+      feedback: {
+        sessionId: id,
+        topic: record.topic,
+        startedAt: record.startedAt,
+        scores: record.scores,
+        notAssessed: draft.notAssessed,
+        strengths: draft.strengths,
+        // Read back from the rows, not re-derived: the learner action has to
+        // survive leaving the session screen (spec §11.3 acceptance criteria).
+        corrections: db.select().from(correctedSentences)
+          .where(eq(correctedSentences.sessionId, id)).all()
+          .map((c) => ({
+            id: c.id, original: c.original, suggested: c.suggested,
+            explanation: c.explanation ?? "", skill: c.skillCode, evidence: c.evidence,
+            confidence: c.confidence, learnerAction: c.learnerAction,
+          })),
+        vocabulary: draft.vocabulary,
+        next: next ? {
+          topic: next.topic,
+          targets: [
+            ...(tryParseJson<string[]>(next.primaryTargets) ?? []),
+            ...(tryParseJson<string[]>(next.secondaryTargets) ?? []),
+          ],
+          reason: next.reasoning,
+        } : null,
+      },
+    };
   });
 
   /** Failed jobs, newest first, with their attempt history. */

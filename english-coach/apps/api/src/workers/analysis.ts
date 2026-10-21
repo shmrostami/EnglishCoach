@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 import { eq, and } from "drizzle-orm";
 import {
   sessions, utterances, observations, skills, errorPatterns, vocabularyItems,
-  learners, jobs, tryParseJson, type DrizzleDb,
+  learners, jobs, correctedSentences, tryParseJson, type DrizzleDb,
 } from "@ec/db";
 import type { Scores, SessionAnalysis, SessionMetrics, Observation, SkillState } from "@ec/domain";
 import { SessionAnalysisSchema } from "@ec/domain";
 import type { AnalysisProvider, TranscriptTurn } from "@ec/openai";
 import {
   calculateOverall, updateSkill, trendFromDelta,
-  upsertErrorInput, shouldRetire, estimateLevel,
+  upsertErrorInput, shouldRetire, estimateLevel, deriveFeedback,
   type ErrorPatternInput,
 } from "@ec/learning-engine";
 import { buildLearnerContext } from "./context.js";
@@ -75,6 +75,14 @@ export async function runAnalysis(opts: {
   // mid-run retry a no-op)
   applyMemory(d, session.learnerId, sessionId, stored, overall, now);
 
+  // 4) persist the reviewable corrections (spec §11.3). Derived from the
+  // stored analysis, so a retry writes the same rows; the `any existing` guard
+  // means a re-run cannot duplicate them (spec §3 principle 6). Written before
+  // the session row is marked analysed: a crash in between must not leave a
+  // session that looks analysed but has no corrections, because the idempotency
+  // guard at the top would then never run this code again.
+  persistCorrections(d, sessionId, stored, now);
+
   d.update(sessions).set({
     status: "COMPLETED",
     fluencyScore: scores.fluency,
@@ -113,7 +121,7 @@ export async function runAnalysis(opts: {
     }).run();
   }
 
-  // 4) queue the planner
+  // 5) queue the planner
   try {
     d.insert(jobs).values({
       id: `job-${randomUUID()}`,
@@ -125,6 +133,26 @@ export async function runAnalysis(opts: {
       createdAt: now,
     }).run();
   } catch { /* duplicate no-op */ }
+}
+
+function persistCorrections(d: DrizzleDb, sessionId: string, analysis: SessionAnalysis, now: number): void {
+  const existing = d.select().from(correctedSentences)
+    .where(eq(correctedSentences.sessionId, sessionId)).all();
+  if (existing.length > 0) return;
+  for (const c of deriveFeedback(analysis).corrections) {
+    d.insert(correctedSentences).values({
+      id: `corr-${randomUUID()}`,
+      sessionId,
+      original: c.original,
+      suggested: c.suggested,
+      explanation: c.explanation,
+      skillCode: c.skill,
+      evidence: c.evidence,
+      confidence: c.confidence,
+      learnerAction: "pending",
+      createdAt: now,
+    }).run();
+  }
 }
 
 function applyMemory(
