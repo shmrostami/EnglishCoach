@@ -327,12 +327,12 @@
   <p class="lede">What the app actually does, where each piece lives, and which parts of the design document never made it into code. Built by reading the source, not the docs.</p>
 
   <div class="stats">
-    <div class="stat"><b>5</b><span>web routes</span></div>
-    <div class="stat"><b>14</b><span>HTTP + WS routes</span></div>
+    <div class="stat"><b>6</b><span>web routes</span></div>
+    <div class="stat"><b>18</b><span>HTTP + WS routes</span></div>
     <div class="stat"><b>10</b><span>session states</span></div>
     <div class="stat"><b>20</b><span>skill codes</span></div>
     <div class="stat"><b>3</b><span>provider modes</span></div>
-    <div class="stat"><b>197</b><span>tests, 33 files</span></div>
+    <div class="stat"><b>224</b><span>tests, 37 files</span></div>
   </div>
 
   <section>
@@ -381,7 +381,7 @@
 
   <section>
     <h2>Screens</h2>
-    <p class="note">Five routes, each under its own error boundary. No settings, no history browser, no profile screen, no error-pattern view, and no control to accept or dismiss a correction — the transcript exists only while a session is live.</p>
+    <p class="note">Six routes, each under its own error boundary. No settings, no history browser, no profile screen, no error-pattern view, and no control to accept or dismiss a correction — the transcript exists only while a session is live.</p>
     <div class="grid2">
       <div class="card">
         <h3><code>/</code> Session</h3>
@@ -394,6 +394,10 @@
       <div class="card">
         <h3><code>/review</code> and <code>/review/:sessionId</code></h3>
         <p>The newest completed session, or a named one: dimension scores with "not assessed" for an unmeasured dimension, strengths, up to three corrections (original → suggested, with an explanation), vocabulary to keep, and the next session's topic, targets and reason. Handles loading, no-session, still-analysing and failed-analysis states.</p>
+      </div>
+      <div class="card">
+        <h3><code>/settings</code></h3>
+        <p>Correction style, session length, feedback language and preferred accent. An unset preference stays empty — it never shows a default the learner did not choose.</p>
       </div>
       <div class="card">
         <h3><code>/goals</code></h3>
@@ -418,6 +422,11 @@
           <tr><td><code>POST /v1/sessions/:id/end</code></td><td>Ends once, computes metrics, enqueues analysis, tears down the live bridge and releases the cached provider.</td></tr>
           <tr><td><code>POST /v1/sessions/:id/analyze</code></td><td>Re-queues a failed analysis; 409 for an already-analyzed session.</td></tr>
           <tr><td><code>GET /v1/sessions/:id/feedback</code></td><td>Persisted post-session review: scores, unassessed dimensions, strengths, stored corrections with their learner action, vocabulary, and the next plan's topic, targets and reason. Not analysed yet → <code>200</code> with <code>feedback: null</code> and the session state.</td></tr>
+          <tr><td><code>GET …/errors</code></td><td>Recurring error patterns with frequency, decayed effective frequency, severity, confidence, a representative correction, and a trend that stays <code>null</code> until two sessions carry evidence.</td></tr>
+          <tr><td><code>GET …/review-queue</code></td><td>Due vocabulary within a review budget, alternating recognition with production.</td></tr>
+          <tr><td><code>POST …/reviews/:word/attempts</code></td><td>Records an attempt and reschedules from it.</td></tr>
+          <tr><td><code>GET …/preferences</code></td><td>Learner-chosen settings; every field <code>null</code> until chosen.</td></tr>
+          <tr><td><code>PATCH …/preferences</code></td><td>Correction style, session minutes (1–120), feedback language, accent. Correction style is mirrored onto the learners row so the live coach uses it.</td></tr>
           <tr><td><code>GET /v1/jobs/failed</code></td><td>Failed jobs with their attempt history and error class.</td></tr>
           <tr><td><code>GET /v1/learners/:id</code></td><td>Profile: languages, target and estimated level, correction style.</td></tr>
           <tr><td><code>GET …/skills</code></td><td>Raw skill rows with mastery, confidence, trend.</td></tr>
@@ -466,6 +475,7 @@
           <tr><td><code>difficulty</code></td><td>±0.02 to ±0.05 steps clamped between 0.15 and 0.95.</td></tr>
           <tr><td><code>prioritization</code></td><td>Six-term priority: recurrence, severity, goal relevance, communicative impact, readiness, forgetting risk.</td></tr>
           <tr><td><code>planning</code></td><td>Target selection, intervention choice, CEFR banding.</td></tr>
+          <tr><td><code>review</code></td><td>Documented interval policy — correct recall ×2.5, a lapse back to one day, capped at 180. Deliberately <strong>not</strong> SM-2 or FSRS and not claimed to be. Queue picks due items within a budget and alternates recognition with production.</td></tr>
           <tr><td><code>feedback</code></td><td>The review shape from a stored analysis: unassessed dimensions, top-three strengths, top-three corrections, deduped vocabulary. A suggested sentence is produced only when the wrong form actually occurs in the quoted evidence — otherwise it stays <code>null</code> rather than being invented.</td></tr>
         </tbody>
       </table>
@@ -545,12 +555,13 @@
       <li><span class="chip warn">gap</span> &nbsp;The client retries a reconnect even when the server has already rejected the session (4000/4001), so a dead session burns the whole attempt budget before the UI gives up.</li>
       <li><span class="chip warn">gap</span> &nbsp;The start control the client sends is ignored server-side.</li>
       <li><span class="chip warn">gap</span> &nbsp;A correction's learner action is persisted but nothing sets it — there is no accept/dismiss control or route yet.</li>
-      <li><span class="chip warn">gap</span> &nbsp;There is no read endpoint for error patterns, so the review shows corrections from one session, not the recurring patterns behind them.</li>
+      <li><span class="chip warn">gap</span> &nbsp;Vocabulary review is button-driven, not a spoken or typed recall exercise — the schedule moves, the practice does not.</li>
+      <li><span class="chip warn">gap</span> &nbsp;Preferences are stored and reach the coach prompt, but nothing gates on them yet (session length is not enforced).</li>
     </ul>
   </section>
 
   <footer>
-    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization and post-session feedback slices. Paths are relative to the repository root. Test count reflects a green run of the full suite.
+    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization, post-session feedback, and review/settings slices. Paths are relative to the repository root. Test count reflects a green run of the full suite.
   </footer>
 
 </div>

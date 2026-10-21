@@ -181,3 +181,29 @@ CREATE TABLE corrected_sentences (
   learner_action TEXT NOT NULL DEFAULT 'pending',
   created_at INTEGER NOT NULL
 );
+
+-- Post-session learner preferences (spec §6.1: "learners must be able to edit
+-- them"). Kept as settings on the learners row, never as proof of proficiency.
+CREATE TABLE learner_preferences (
+  learner_id TEXT PRIMARY KEY REFERENCES learners(id),
+  correction_style TEXT,
+  preferred_session_minutes INTEGER,
+  preferred_feedback_language TEXT,
+  preferred_accent TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+-- One attempt at recalling a vocabulary item (spec §6.5, §7.4). The schedule is
+-- derived from these, so an attempt is append-only: a correction is a new row.
+CREATE TABLE review_attempts (
+  id TEXT PRIMARY KEY,
+  learner_id TEXT NOT NULL REFERENCES learners(id),
+  vocabulary_item_id TEXT REFERENCES vocabulary_items(id),
+  word TEXT NOT NULL,
+  prompt_type TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  hint_used INTEGER NOT NULL DEFAULT 0,
+  interval_days REAL,
+  scheduler_version TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);

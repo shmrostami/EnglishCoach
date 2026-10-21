@@ -10,6 +10,10 @@ vi.mock("../api/client.js", () => ({
   api: {
     progress: vi.fn(async () => [{ id: "sess-new" }]),
     feedback: vi.fn(),
+    // ReviewView now renders ReviewSections, which loads these too.
+    errors: vi.fn(async () => ({ patterns: [], generatedAt: Date.now() })),
+    reviewQueue: vi.fn(async () => []),
+    recordReview: vi.fn(),
   },
 }));
 
@@ -95,7 +99,7 @@ describe("ReviewView", () => {
     const { api } = await import("../api/client.js");
     vi.mocked(api.progress).mockResolvedValueOnce([] as never);
     const container = await render();
-    expect(container.textContent).toContain("Nothing to review yet");
+    expect(container.textContent).toContain("No finished session to review yet");
     await unmount(container);
   });
 });

@@ -200,6 +200,109 @@ describe("HTTP API", () => {
     expect(body.feedback.next?.targets).toContain("grammar.past_tense");
   });
 
+  it("returns recurring errors with their evidence, trend and example", async () => {
+    // A fresh database: the trend is computed over the learner's completed
+    // sessions, so earlier tests' sessions would otherwise decide it.
+    const fresh = openDb(":memory:");
+    migrate(fresh);
+    ensureSeed(fresh);
+    const freshService = new SessionService(db(fresh));
+    const isolated = await buildApp({
+      service: freshService, db: db(fresh), registry: new BridgeRegistry(),
+      selectSpeech: () => new MockSpeechProvider({ turns: SCRIPT, autoClose: false }),
+      env: { PORT: 0, HOST: "127.0.0.1", DB_PATH: ":memory:", PROVIDER: "mock", WARMUP_MS: 50, SESSION_TARGET_MS: 60_000, OPENAI_API_KEY: undefined },
+      queue: () => {},
+    });
+    const created = freshService.createSession(LEARNER_ID, Date.now());
+    fresh.prepare("UPDATE sessions SET status='COMPLETED' WHERE id=?").run(created.id);
+    fresh.prepare(
+      "INSERT INTO error_patterns (id, learner_id, skill_code, pattern, description, frequency, severity, mastery, confidence, status, first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+    ).run("err-t1", LEARNER_ID, "grammar.past_tense", "present_form_after_past_time_expression",
+      "Base form after a past time expression", 3, 0.65, 0.2, 0.97, "active", Date.now() - 1000, Date.now());
+    fresh.prepare(
+      "INSERT INTO corrected_sentences (id, session_id, original, suggested, explanation, skill_code, evidence, confidence, learner_action, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    ).run("corr-e1", created.id, "Yesterday I go to work", "Yesterday I went to work",
+      'Replace "go" with "went" here.', "grammar.past_tense", "Yesterday I go to work", 0.9, "pending", Date.now());
+
+    const res = await isolated.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/errors` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { patterns: { skill: string; frequency: number; trend: string | null; example: { original: string; suggested: string | null } | null }[] };
+    const pattern = body.patterns.find((p) => p.skill === "grammar.past_tense");
+    expect(pattern).toBeTruthy();
+    expect(pattern?.frequency).toBe(3);
+    expect(pattern?.example).toMatchObject({ original: "Yesterday I go to work", suggested: "Yesterday I went to work" });
+    // One session of evidence is not a trend (spec §3 principle 7).
+    expect(pattern?.trend).toBeNull();
+
+    expect((await isolated.inject({ method: "GET", url: "/v1/learners/nobody/errors" })).statusCode).toBe(404);
+    await isolated.close();
+  });
+
+  it("serves a due review queue and reschedules the item from a recorded attempt", async () => {
+    sqlite.prepare(
+      "INSERT INTO vocabulary_items (id, learner_id, word, recognition_mastery, production_mastery, collocation_mastery, exposure_count, production_count, last_used_at, next_review_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    ).run("voc-1", LEARNER_ID, "negotiate", 0.3, 0.4, 0, 0, 1, Date.now() - 2000, null);
+
+    const queue = await app.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/review-queue` });
+    expect(queue.statusCode).toBe(200);
+    expect((queue.json() as { word: string }[]).some((i) => i.word === "negotiate")).toBe(true);
+
+    const before = sqlite.prepare("SELECT production_mastery, next_review_at FROM vocabulary_items WHERE id='voc-1'")
+      .get() as { production_mastery: number; next_review_at: number | null };
+    expect(before.next_review_at).toBeNull();
+
+    const attempt = await app.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/reviews/negotiate/attempts`,
+      payload: { outcome: "correct", promptType: "production" },
+    });
+    expect(attempt.statusCode).toBe(200);
+    const out = attempt.json() as { intervalDays: number; nextReviewAt: number; schedulerVersion: string };
+    expect(out.intervalDays).toBeGreaterThan(0);
+    expect(out.nextReviewAt).toBeGreaterThan(Date.now());
+    expect(out.schedulerVersion).toBe("interval-v1");
+
+    const after = sqlite.prepare("SELECT production_mastery, next_review_at FROM vocabulary_items WHERE id='voc-1'")
+      .get() as { production_mastery: number; next_review_at: number | null };
+    expect(after.production_mastery).toBeGreaterThan(before.production_mastery);
+    expect(after.next_review_at).toBeGreaterThan(Date.now());
+
+    // The attempt is persisted, not just applied (spec §7.4 requirement 3).
+    const attempts = sqlite.prepare("SELECT COUNT(*) AS n FROM review_attempts WHERE word='negotiate'").get() as { n: number };
+    expect(attempts.n).toBe(1);
+
+    // Bad outcome and unknown word are client errors, not 500s.
+    expect((await app.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/reviews/negotiate/attempts`, payload: { outcome: "maybe" },
+    })).statusCode).toBe(400);
+    expect((await app.inject({
+      method: "POST", url: `/v1/learners/${LEARNER_ID}/reviews/absent/attempts`, payload: { outcome: "correct" },
+    })).statusCode).toBe(404);
+  });
+
+  it("stores preferences, and an unset preference stays null rather than a default", async () => {
+    const empty = await app.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/preferences` });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json()).toMatchObject({ correctionStyle: null, preferredSessionMinutes: null, updatedAt: null });
+
+    const save = await app.inject({
+      method: "PATCH", url: `/v1/learners/${LEARNER_ID}/preferences`,
+      payload: { correctionStyle: "intensive", preferredSessionMinutes: 20 },
+    });
+    expect(save.statusCode).toBe(200);
+
+    const saved = await app.inject({ method: "GET", url: `/v1/learners/${LEARNER_ID}/preferences` });
+    expect(saved.json()).toMatchObject({ correctionStyle: "intensive", preferredSessionMinutes: 20 });
+    // The live coach reads correction style off the learners row — a stored
+    // preference that never reached it would be cosmetic.
+    const learner = sqlite.prepare("SELECT correction_style FROM learners WHERE id=?").get(LEARNER_ID) as { correction_style: string };
+    expect(learner.correction_style).toBe("intensive");
+
+    expect((await app.inject({
+      method: "PATCH", url: `/v1/learners/${LEARNER_ID}/preferences`, payload: { preferredSessionMinutes: 0 },
+    })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/v1/learners/nobody/preferences" })).statusCode).toBe(404);
+  });
+
   it("re-enqueues a failed analysis job and refuses an already-analyzed session", async () => {
     const created = (await app.inject({ method: "POST", url: `/v1/learners/${LEARNER_ID}/sessions` })).json() as { sessionId: string };
     // A failed job row exists for this session (the runner exhausted its attempts).

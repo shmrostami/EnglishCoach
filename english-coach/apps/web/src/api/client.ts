@@ -70,6 +70,38 @@ export interface FeedbackResponse {
   feedback: SessionFeedback | null;
 }
 
+export interface ErrorPattern {
+  id: string;
+  skill: string;
+  pattern: string;
+  description: string | null;
+  frequency: number;
+  effectiveFrequency: number;
+  severity: number;
+  confidence: number;
+  status: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  trend: "improving" | "stable" | "declining" | null;
+  example: { original: string; suggested: string | null } | null;
+}
+
+export interface ReviewQueueItem {
+  word: string;
+  promptType: "recognition" | "production";
+  recognitionMastery: number;
+  productionMastery: number;
+  nextReviewAt: number | null;
+}
+
+export interface Preferences {
+  correctionStyle: string | null;
+  preferredSessionMinutes: number | null;
+  preferredFeedbackLanguage: string | null;
+  preferredAccent: string | null;
+  updatedAt: number | null;
+}
+
 export const api = {
   createSession: () => http<{ sessionId: string; topic: string; difficulty: number; state: string }>(
     `/v1/learners/${LEARNER_ID}/sessions`, { method: "POST" }),
@@ -91,4 +123,14 @@ export const api = {
     http<{ id: string }>(`/v1/learners/${LEARNER_ID}/goals`, { method: "POST", body: JSON.stringify(g) }),
   patchGoal: (id: string, patch: Record<string, unknown>) =>
     http<{ ok: boolean }>(`/v1/learners/${LEARNER_ID}/goals/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  errors: () => http<{ patterns: ErrorPattern[]; generatedAt: number }>(`/v1/learners/${LEARNER_ID}/errors`),
+  reviewQueue: (limit = 10) =>
+    http<ReviewQueueItem[]>(`/v1/learners/${LEARNER_ID}/review-queue?limit=${limit}`),
+  recordReview: (word: string, body: { outcome: "correct" | "incorrect"; hintUsed?: boolean; promptType?: string }) =>
+    http<{ word: string; intervalDays: number; nextReviewAt: number; schedulerVersion: string }>(
+      `/v1/learners/${LEARNER_ID}/reviews/${encodeURIComponent(word)}/attempts`,
+      { method: "POST", body: JSON.stringify(body) }),
+  preferences: () => http<Preferences>(`/v1/learners/${LEARNER_ID}/preferences`),
+  savePreferences: (patch: Partial<Preferences>) =>
+    http<{ ok: boolean }>(`/v1/learners/${LEARNER_ID}/preferences`, { method: "PATCH", body: JSON.stringify(patch) }),
 };

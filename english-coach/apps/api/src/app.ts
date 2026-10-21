@@ -6,6 +6,7 @@ import { BridgeRegistry } from "./realtime/bridge.js";
 import { registerWsRoutes } from "./routes/ws-session.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerLearnerRoutes } from "./routes/learners.js";
+import { registerLearningRoutes } from "./routes/learning.js";
 import type { SpeechConversationProvider } from "@ec/openai";
 import type { DrizzleDb } from "@ec/db";
 import { createLogger, type Logger } from "./logger.js";
@@ -36,6 +37,7 @@ export async function buildApp(deps: AppDeps) {
     retry: deps.retry ?? (() => false),
   });
   registerLearnerRoutes(app, deps.db);
+  registerLearningRoutes(app, deps.db);
   registerWsRoutes(app, { ...deps, logger: log }); // deps includes queue; bridge enqueues analysis on client end
   return app;
 }

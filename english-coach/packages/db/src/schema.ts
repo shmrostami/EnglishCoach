@@ -178,6 +178,32 @@ export const correctedSentences = sqliteTable("corrected_sentences", {
   createdAt: integer("created_at").notNull(),
 });
 
+// Learner-chosen settings (spec §6.1). Never evidence of proficiency; every
+// column is nullable so "not set" stays distinguishable from a default.
+export const learnerPreferences = sqliteTable("learner_preferences", {
+  learnerId: text("learner_id").primaryKey().references(() => learners.id),
+  correctionStyle: text("correction_style"),
+  preferredSessionMinutes: integer("preferred_session_minutes"),
+  preferredFeedbackLanguage: text("preferred_feedback_language"),
+  preferredAccent: text("preferred_accent"),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+// Append-only review attempts (spec §6.5, §7.4): the schedule is derived from
+// them, so an attempt is never edited — a re-answer is a new row.
+export const reviewAttempts = sqliteTable("review_attempts", {
+  id: text("id").primaryKey(),
+  learnerId: text("learner_id").notNull().references(() => learners.id),
+  vocabularyItemId: text("vocabulary_item_id").references(() => vocabularyItems.id),
+  word: text("word").notNull(),
+  promptType: text("prompt_type").notNull(),
+  outcome: text("outcome").notNull(),
+  hintUsed: integer("hint_used").notNull().default(0),
+  intervalDays: real("interval_days"),
+  schedulerVersion: text("scheduler_version").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
 export type SkillRow = typeof skills.$inferSelect;
 export type ErrorRow = typeof errorPatterns.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
@@ -189,3 +215,5 @@ export type ObservationRow = typeof observations.$inferSelect;
 export type InterventionRow = typeof interventions.$inferSelect;
 export type JobAttemptRow = typeof jobAttempts.$inferSelect;
 export type CorrectedSentenceRow = typeof correctedSentences.$inferSelect;
+export type LearnerPreferenceRow = typeof learnerPreferences.$inferSelect;
+export type ReviewAttemptRow = typeof reviewAttempts.$inferSelect;

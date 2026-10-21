@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type FeedbackResponse, type SessionFeedback } from "../api/client.js";
+import { ReviewSections } from "./ReviewSections.js";
 
 const DIMENSION_LABEL: Record<string, string> = {
   fluency: "Fluency", grammar: "Grammar", vocabulary: "Vocabulary",
@@ -59,7 +60,8 @@ export function ReviewView() {
     return (
       <section className="ec-review">
         <h1 className="ec-h1">Review</h1>
-        <p className="ec-empty">Nothing to review yet — finish a session and it will appear here.</p>
+        <p className="ec-empty">No finished session to review yet. What is already known about your learning is below.</p>
+        <ReviewSections />
       </section>
     );
   }
@@ -174,6 +176,8 @@ function FeedbackBody({ fb }: { fb: SessionFeedback }) {
           <p className="ec-empty">No plan yet — the coach plans the next session after this one.</p>
         )}
       </div>
+
+      <ReviewSections />
 
       <Link className="ec-btn ec-btn--primary" to="/">Speak again</Link>
     </section>

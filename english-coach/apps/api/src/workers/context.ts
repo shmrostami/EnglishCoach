@@ -1,7 +1,7 @@
 import { eq, and, desc, ne, isNotNull } from "drizzle-orm";
 import {
   learners, goalsTable, skills, errorPatterns, sessions, learningPlans,
-  type DrizzleDb,
+  vocabularyItems, learnerPreferences, type DrizzleDb,
 } from "@ec/db";
 import type { LearnerContext } from "@ec/domain";
 
@@ -38,14 +38,26 @@ export function buildLearnerContext(
         .orderBy(desc(sessions.startedAt)).all();
   const recent = topicRows.slice(0, 5).map((x) => x.topic ?? "").filter(Boolean);
   const primary = plan ? safeParse(plan.primaryTargets) : [];
+  // Due reviews are a real planning input (spec §7.5), so the words travel with
+  // the context instead of being recomputed by every caller. A word is a target
+  // when it is due and has not been fully learned.
+  const prefs = d.select().from(learnerPreferences)
+    .where(eq(learnerPreferences.learnerId, learnerId)).all()[0];
+  const vocabularyTargets = d.select().from(vocabularyItems)
+    .where(eq(vocabularyItems.learnerId, learnerId)).all()
+    .filter((v) => v.productionMastery < 0.8 && (v.nextReviewAt === null || v.nextReviewAt <= _now))
+    .sort((a, b) => (a.nextReviewAt ?? 0) - (b.nextReviewAt ?? 0))
+    .slice(0, 10)
+    .map((v) => v.word);
   return {
     level: learner.estimatedLevel ?? learner.targetLevel ?? "B1",
     goals: goals.map((g) => g.description),
     strengths,
     activeWeaknesses: recurring,
-    vocabularyTargets: [],
+    vocabularyTargets,
     difficulty: plan?.difficulty ?? session?.plannedDifficulty ?? 0.5,
-    correctionStyle: learner.correctionStyle,
+    // A stored preference wins over the seeded row: it is what the learner chose.
+    correctionStyle: prefs?.correctionStyle ?? learner.correctionStyle,
     recentTopics: recent,
     currentSessionTargets: primary,
   };

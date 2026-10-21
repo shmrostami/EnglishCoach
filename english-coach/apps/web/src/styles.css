@@ -650,3 +650,21 @@ body::before {
 }
 .ec-review__vocab { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .ec-reviewlink { margin: 1rem 0 0; }
+
+/* ---------- Review: recurring errors + due words ---------- */
+.ec-trend {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
+  background: var(--tan-tint);
+  color: var(--tan);
+}
+.ec-trend--improving { color: var(--live-deep); }
+.ec-trend--declining { color: var(--live); }
+.ec-trend--unknown { color: var(--ink-soft); font-weight: 500; }
+
+/* Settings reuses the existing .ec-form / .ec-form__row / .ec-field rules;
+   only the inline label needs a width so the fields line up. */
+.ec-form__row > span { min-width: 11rem; font-size: 0.85rem; font-weight: 600; color: var(--ink-soft); }

@@ -131,6 +131,42 @@ export interface SessionFeedback {
   next: { topic: string | null; targets: string[]; reason: string | null } | null;
 }
 
+/** Learner-chosen settings (spec §6.1). A null field means "not set". */
+export interface LearnerPreferences {
+  correctionStyle: string | null;
+  preferredSessionMinutes: number | null;
+  preferredFeedbackLanguage: string | null;
+  preferredAccent: string | null;
+  updatedAt: number | null;
+}
+
+/** One recurring error, with the evidence a learner can act on (spec §7.2). */
+export interface ErrorPatternView {
+  id: string;
+  skill: string;
+  pattern: string;
+  description: string | null;
+  frequency: number;
+  /** Frequency decayed by age, 30-day half-life — "how bad is it now". */
+  effectiveFrequency: number;
+  severity: number;
+  confidence: number;
+  status: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  /** null when fewer than two sessions carried evidence — not a trend yet. */
+  trend: "improving" | "stable" | "declining" | null;
+  example: { original: string; suggested: string | null } | null;
+}
+
+export interface ReviewItem {
+  word: string;
+  promptType: "recognition" | "production";
+  recognitionMastery: number;
+  productionMastery: number;
+  nextReviewAt: number | null;
+}
+
 export interface PlanDraft {
   topic: string;
   candidateSkills: string[];
