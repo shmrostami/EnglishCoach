@@ -40,6 +40,12 @@ Call request_micro_coaching when you decide to make a micro-correction,
 and call request_target_retry when you want another practice opportunity
 for a target structure.
 
+When you call either tool, the "skill" argument MUST be one of these exact
+skill codes — a bare family name like "grammar" is not a skill and the call
+will be rejected:
+
+{{skill_codes}}
+
 LEARNER CONTEXT
 
 {{learner_context}}

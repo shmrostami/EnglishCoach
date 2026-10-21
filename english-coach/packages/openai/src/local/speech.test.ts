@@ -53,7 +53,7 @@ interface StubLlm {
   close: () => void;
 }
 
-async function startLlm(): Promise<StubLlm> {
+async function startLlm(reply?: (n: number) => unknown): Promise<StubLlm> {
   const stub: StubLlm = { port: 0, calls: 0, failFirst: false, close: () => {} };
   // A 500 response is REQUIRED for the retry test: the SDK only treats a
   // non-2xx status as a failure — a 200 with an empty choices array resolves
@@ -69,7 +69,10 @@ async function startLlm(): Promise<StubLlm> {
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "Sure — let's talk about that." } }] }));
+      const body = reply
+        ? reply(stub.calls)
+        : { choices: [{ message: { role: "assistant", content: "Sure — let's talk about that." } }] };
+      res.end(JSON.stringify(body));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -251,6 +254,62 @@ describe("LocalSpeechProvider", () => {
     expect(coach[0].turn.text).toBe("Sure — let's talk about that."); // the retry's reply
     expect(llm.calls).toBe(2); // 500 then 200 — exactly one retry, no third call
     expect(events.some((e) => e.t === "closed")).toBe(false);
+    p.close();
+    sidecar.close();
+    llm.close();
+  }, 30_000);
+
+  it("emits a tool_call when the model asks for one, with the skill and reason", async () => {
+    const llm = await startLlm(() => ({
+      choices: [{
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-1",
+            type: "function",
+            function: {
+              name: "request_micro_coaching",
+              arguments: JSON.stringify({ skill: "grammar.past_tense", reason: "past tense after 'yesterday'" }),
+            },
+          }],
+        },
+      }],
+    }));
+    const { p, sidecar, events, feedFrames } = makeProvider(`http://127.0.0.1:${llm.port}/v1`);
+    await p.connect((e) => events.push(e));
+    feedFrames(10, 8);
+    await waitFor(() => events.some((e) => e.t === "tool_call"), "the tool call");
+
+    const call = events.find((e): e is Extract<ProviderEvent, { t: "tool_call" }> => e.t === "tool_call")!;
+    expect(call.name).toBe("request_micro_coaching");
+    expect(call.skill).toBe("grammar.past_tense");
+    expect(call.reason).toBe("past tense after 'yesterday'");
+    p.close();
+    sidecar.close();
+    llm.close();
+  }, 30_000);
+
+  it("ignores a tool call for a skill code that does not exist", async () => {
+    const llm = await startLlm(() => ({
+      choices: [{
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "request_micro_coaching", arguments: JSON.stringify({ skill: "grammar.telepathy", reason: "x" }) },
+          }],
+        },
+      }],
+    }));
+    const { p, sidecar, events, feedFrames } = makeProvider(`http://127.0.0.1:${llm.port}/v1`);
+    await p.connect((e) => events.push(e));
+    feedFrames(10, 8);
+    await waitFor(() => learners(events).length > 0, "the learner's turn");
+    // An invented skill never becomes an intervention.
+    expect(events.some((e) => e.t === "tool_call")).toBe(false);
     p.close();
     sidecar.close();
     llm.close();

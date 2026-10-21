@@ -1,5 +1,6 @@
 import type WebSocket from "ws";
 import type { SessionState, LearnerContext } from "@ec/domain";
+import { SKILL_CODES } from "@ec/domain";
 import type { SpeechConversationProvider, ProviderEvent, TranscriptTurn } from "@ec/openai";
 import { renderPrompt } from "@ec/prompts";
 import type { SessionService } from "../services/session.js";
@@ -64,6 +65,9 @@ export class RealtimeBridge {
       learner_context: JSON.stringify(this.opts.learnerContext),
       targets: this.opts.learnerContext.currentSessionTargets.join(", ") || "none",
       difficulty: String(this.opts.difficulty),
+      // The tool's `skill` argument is validated against this list, so the
+      // model has to be told the exact codes — a bare "grammar" is rejected.
+      skill_codes: SKILL_CODES.join("\n"),
     });
     this.opts.provider.sendInstruction(instructions);
     this.transition("WARMUP");

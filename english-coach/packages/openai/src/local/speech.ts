@@ -1,4 +1,5 @@
 import { OpenAI } from "openai";
+import { isSkillCode } from "@ec/domain";
 import { VoiceEndpoint } from "./endpoint.js";
 import type { VoiceSidecar } from "./sidecar.js";
 import type { ProviderEvent, SpeechConversationProvider, TranscriptTurn } from "../providers/types.js";
@@ -18,6 +19,28 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // can't narrow it. Each request resolves with exactly one member shape, so the
 // casts at the call sites are exact — they only make the known shape explicit.
 type SttResponse = { ok: true; text: string } | { ok: false; error: string };
+
+/** What one LLM turn produced: a coach line, a tool call, or both. */
+type LlmReply = {
+  content: string;
+  toolCall?: {
+    id: string;
+    name: "request_micro_coaching" | "request_target_retry";
+    args: Record<string, unknown>;
+    content?: string;
+  };
+};
+
+/** Tool arguments arrive as a JSON string; a malformed one is not a crash. */
+function parseArgs(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
 type TtsResponse = { ok: true; audio: Buffer; sampleRate: number } | { ok: false; error: string };
 
 /**
@@ -120,6 +143,44 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
     this.onEvent?.({ t: "transcript", turn });
   }
 
+  /**
+   * The two coaching tools, in the OpenAI-compatible chat format.
+   *
+   * These are the same two the OpenAI Realtime provider exposes. The local
+   * provider had none, so micro-coaching and target-retry never fired in
+   * local mode and only the timer-driven challenge did — the coach could see
+   * an error but had no way to act on it mid-conversation.
+   */
+  private static readonly TOOLS = [
+    {
+      type: "function" as const,
+      function: {
+        name: "request_micro_coaching",
+        description: "Request a brief correction of a recurring or target error the learner just made.",
+        parameters: {
+          type: "object",
+          properties: {
+            skill: { type: "string", description: "The skill code, e.g. grammar.past_tense" },
+            reason: { type: "string", description: "What the learner did that triggered this" },
+          },
+          required: ["skill", "reason"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "request_target_retry",
+        description: "Create another opportunity for the learner to practise a target structure.",
+        parameters: {
+          type: "object",
+          properties: { skill: { type: "string", description: "The skill code to practise" } },
+          required: ["skill"],
+        },
+      },
+    },
+  ];
+
   /** STT → learner transcript → LLM (one retry) → coach transcript → TTS. */
   private async handleLearnerTurn(audio: Buffer): Promise<void> {
     if (this.closed) return; // a queued turn must not talk to a closed sidecar
@@ -143,8 +204,30 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
     const reply = await this.callLLM();
     if (this.closed) return;
     if (reply === null) { this.emitClosed("coach_unavailable"); return; }
-    this.emitTurn("coach", reply);
-    this.history.push({ role: "assistant", content: reply });
+    // A tool call is not a coach line: it asks the bridge to intervene. It is
+    // emitted as its own event and the turn continues with the tool result
+    // fed back, so the coach still says something afterwards.
+    if (reply.toolCall) {
+      this.emitToolCall(reply.toolCall);
+      if (this.closed) return;
+      this.history.push({
+        role: "assistant",
+        content: reply.toolCall.content ?? "",
+        tool_calls: [{
+          id: reply.toolCall.id,
+          type: "function",
+          function: { name: reply.toolCall.name, arguments: JSON.stringify(reply.toolCall.args) },
+        }],
+      });
+      this.history.push({
+        role: "tool",
+        tool_call_id: reply.toolCall.id,
+        content: "requested",
+      });
+    } else {
+      this.emitTurn("coach", reply.content);
+      this.history.push({ role: "assistant", content: reply.content });
+    }
 
     // 3. Speak it. Piper failing here must NOT kill the session: the text
     //    already landed, so drop the audio and keep the conversation alive.
@@ -160,21 +243,57 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
   }
 
   /** Two attempts total (the SDK retries 0). Returns null when both fail. */
-  private async callLLM(): Promise<string | null> {
+  private async callLLM(): Promise<LlmReply | null> {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await this.client.chat.completions.create(
-          { model: this.opts.llmModel, messages: this.history },
-          { timeout: 30_000 }, // request option (2nd arg) — the create body type has no `timeout` field
+          { model: this.opts.llmModel, messages: this.history, tools: LocalSpeechProvider.TOOLS },
+          { timeout: 60_000 }, // request option (2nd arg) — the create body type has no `timeout` field
         );
-        const content = res.choices[0]?.message?.content;
-        if (typeof content === "string" && content.trim()) return content.trim();
+        const message = res.choices[0]?.message;
+        const toolCall = message?.tool_calls?.[0];
+        if (toolCall?.function?.name) {
+          const rawName = toolCall.function.name;
+          // Only the two coaching tools are known here; an unknown name from
+          // the model is ignored rather than forwarded to the bridge.
+          if (rawName !== "request_micro_coaching" && rawName !== "request_target_retry") {
+            return null;
+          }
+          return {
+            content: typeof message?.content === "string" ? message.content : "",
+            toolCall: {
+              id: toolCall.id ?? `call-${rawName}`,
+              name: rawName,
+              args: parseArgs(toolCall.function.arguments),
+              content: typeof message?.content === "string" ? message.content : undefined,
+            },
+          };
+        }
+        const content = message?.content;
+        if (typeof content === "string" && content.trim()) return { content: content.trim() };
         return null; // the endpoint answered but gave nothing usable — don't burn the retry on an empty-but-200 body
       } catch {
         /* attempt 1 failed; the loop makes exactly one more try (the SDK is maxRetries: 0, so this provider-level retry is the only one) */
       }
     }
     return null;
+  }
+
+  /**
+   * Emits a tool call as the provider's `tool_call` event.
+   *
+   * The skill is validated against the known skill codes: a model that invents
+   * "grammar.telepathy" would otherwise create an intervention for a skill
+   * that does not exist, and the bridge would record it as a coaching action
+   * the learner model can never use.
+   */
+  private emitToolCall(call: { id: string; name: string; args: Record<string, unknown> }): void {
+    const name: "request_micro_coaching" | "request_target_retry" =
+      call.name === "request_target_retry" ? "request_target_retry" : "request_micro_coaching";
+    const skill = typeof call.args.skill === "string" ? call.args.skill : "";
+    if (!isSkillCode(skill)) return;
+    const reason = typeof call.args.reason === "string" ? call.args.reason : undefined;
+    this.onEvent?.({ t: "tool_call", name, skill, reason });
   }
 
   private async emitPacedAudio(pcm: Buffer, sampleRate: number): Promise<void> {
