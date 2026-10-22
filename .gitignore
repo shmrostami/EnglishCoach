@@ -1,0 +1,4 @@
+
+# Local dev-server logs
+apps/api/.*-run.log
+apps/web/.*-run.log
