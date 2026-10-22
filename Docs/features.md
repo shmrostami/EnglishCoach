@@ -1,11 +1,13 @@
 # EnglishCoach — Feature Inventory
 
-**Date:** 2026-10-21
+**Date:** 2026-10-22
 **Source of truth:** the code under `english-coach/`, read directly. Where this disagrees with
 `Docs/design.md`, the code wins and the gap is listed in §9.
-**Last verified against:** `main` + the Phase 0 stabilization slice
-(`Docs/plans/2026-10-20-phase-0-stabilization.md`) and the post-session feedback slice
-(`Docs/plans/2026-10-21-post-session-feedback.md`).
+**Last verified against:** `main` @ `dc715f7`, running. Covers the Phase 0 stabilization slice
+(`Docs/plans/2026-10-20-phase-0-stabilization.md`), the post-session feedback slice
+(`Docs/plans/2026-10-21-post-session-feedback.md`), the review/settings slice
+(`Docs/plans/2026-10-21-review-settings-slice.md`) and the activity/diagnostic slice
+(`Docs/plans/2026-10-21-activity-diagnostic-slice.md`).
 
 ---
 
@@ -353,13 +355,22 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 
 ## 11. Tests
 
-`pnpm test` — 44 files, 338 tests, all passing (vitest). Includes an end-to-end pipeline test
+**339 tests across 44 files, all passing** (verified 2026-10-22 with the real-Python
+sidecar test included). Includes an end-to-end pipeline test
 (`apps/api/tests/e2e/pipeline.test.ts`) proving session → utterances → analysis → memory →
-plan → next-session targets, and a real-Python sidecar test.
-
-Test-runner caveats on this machine: `apps/api/tests/env.test.ts` calls `process.chdir()`, which worker threads refuse, so it must run with `--pool=forks`; conversely the forks pool here dies with `spawn UNKNOWN` / `Fatal process out of memory: Zone`, so everything else runs under `--pool=threads --poolOptions.threads.singleThread=true`.
+plan → next-session targets, and a real-Python sidecar test that loads Whisper.
 
 Must run on Node 22: `better-sqlite3` is compiled for Node 22 and Node 24 refuses to load it.
-`packages/openai/src/local/voice_sidecar.test.ts` loads Whisper in a real Python child; on a
-machine short of free RAM it fails with `mkl_malloc: failed to allocate memory` — an
-environment failure, not a code one. Run it on its own when the box is busy.
+
+Test-runner caveats on this machine:
+
+| Test | Needs | Why |
+|---|---|---|
+| `apps/api/tests/env.test.ts` | `--pool=forks` | It calls `process.chdir()`, which worker threads refuse |
+| everything else | `--pool=threads --poolOptions.threads.singleThread=true` | The forks pool dies with `spawn UNKNOWN` / `Fatal process out of memory: Zone` |
+| `packages/openai/src/local/voice_sidecar.test.ts` | free RAM | It loads Whisper in a real Python child; below ~2 GB free it fails with `mkl_malloc: failed to allocate memory` |
+
+The last one is a machine condition, not a code fault: the same failure appeared
+identically outside vitest, and it passes once the box has RAM. The cause of the
+starvation was 47 orphaned `voice_worker` python processes from an unrelated project
+holding ~42 GB of commit charge.
