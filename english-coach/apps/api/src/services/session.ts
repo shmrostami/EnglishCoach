@@ -102,7 +102,7 @@ export class SessionService {
     const r = this.d.select().from(sessions).where(eq(sessions.id, sessionId)).all()[0];
     if (!r) return null;
     return {
-      id: r.id, state: r.status as SessionState, topic: r.topic ?? "",
+      id: r.id, learnerId: r.learnerId, state: r.status as SessionState, topic: r.topic ?? "",
       plannedDifficulty: r.plannedDifficulty ?? 0,
       achievedDifficulty: r.achievedDifficulty ?? r.plannedDifficulty ?? 0,
       startedAt: r.startedAt, endedAt: r.endedAt,

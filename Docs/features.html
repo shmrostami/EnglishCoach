@@ -328,11 +328,11 @@
 
   <div class="stats">
     <div class="stat"><b>7</b><span>web routes</span></div>
-    <div class="stat"><b>30</b><span>HTTP + WS routes</span></div>
+    <div class="stat"><b>35</b><span>HTTP + WS routes</span></div>
     <div class="stat"><b>10</b><span>session states</span></div>
     <div class="stat"><b>20</b><span>skill codes</span></div>
     <div class="stat"><b>3</b><span>provider modes</span></div>
-    <div class="stat"><b>272</b><span>tests, 40 files</span></div>
+    <div class="stat"><b>338</b><span>tests, 44 files</span></div>
   </div>
 
   <section>
@@ -430,6 +430,10 @@
           <tr><td><code>GET …/activities/recommended</code></td><td>The guided-speaking activity for the top objective, generated once per objective. No objective is a valid empty state.</td></tr>
           <tr><td><code>POST …/activities/:id/attempts</code> · <code>…/activity-attempts/:id/submit</code></td><td>Starts and scores an attempt against the session transcript. Pronunciation and the activity's own target skill are reported as <code>not_assessed</code>, with the reason in the summary.</td></tr>
           <tr><td><code>POST/GET …/diagnostic</code></td><td>Self-report placement. Stored, labelled <code>self_report</code>, confidence ≤ 0.5, and it never writes skill mastery.</td></tr>
+          <tr><td><code>GET /v1/sessions/:id/pronunciation</code></td><td>The acoustic assessment — intelligibility, stress, rhythm and a confidence that grows with usable audio. Measured from retained samples, never from the transcript. Null when there was no audio to measure.</td></tr>
+          <tr><td><code>GET /v1/sessions/:id/difficulty</code></td><td>The six-part difficulty profile, so the composite the planner used can be explained component by component.</td></tr>
+          <tr><td><code>GET …/vocabulary</code></td><td>Canonical vocabulary with recognition, recall and production reported separately.</td></tr>
+          <tr><td><code>GET …/activities/types</code></td><td>The five modalities, each with the skills it can evidence and its own rubric version.</td></tr>
           <tr><td><code>GET …/level-history</code></td><td>Every completed session oldest to newest with each dimension's trend — <code>null</code> where a dimension was never assessed twice — and the level recomputed at each point.</td></tr>
           <tr><td><code>GET/POST …/goals/:goalId/milestones</code></td><td>The goal's steps, re-checked against real skill mastery on read, plus suggestions from the learner's weakest skills in that goal's family.</td></tr>
           <tr><td><code>PATCH /v1/sessions/:id/corrections/:id</code></td><td>Records accept/dismiss on a correction. Idempotent; <code>pending</code> is the starting state and is refused.</td></tr>
@@ -574,7 +578,7 @@
   </section>
 
   <footer>
-    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-21 — after the Phase 0 stabilization, post-session feedback, review/settings, activity/diagnostic, and progress/goal-decomposition slices. Paths are relative to the repository root. Test count reflects a green run of the full suite.
+    Compiled from the source tree at <code>english-coach/</code> and the design documents under <code>Docs/</code>, on 2026-10-22 — after the Phase 0 stabilization, post-session feedback, review/settings, activity/diagnostic, progress/goal-decomposition, pronunciation/session-types, and local-tool slices. Paths are relative to the repository root. Test count reflects a green run of the full suite.
   </footer>
 
 </div>

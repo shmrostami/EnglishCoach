@@ -5,11 +5,14 @@ import type { SessionService } from "../services/session.js";
 import type { Env } from "../env.js";
 import type { SpeechConversationProvider } from "@ec/openai";
 import type { Logger } from "../logger.js";
+import type { DrizzleDb } from "@ec/db";
 
 export function registerWsRoutes(
   app: FastifyInstance,
   deps: {
     service: SessionService;
+    /** The database, for the read-only tools the coach may call. */
+    db: DrizzleDb;
     registry: BridgeRegistry;
     selectSpeech: (sessionId: string) => SpeechConversationProvider;
     env: Env;
@@ -43,6 +46,9 @@ export function registerWsRoutes(
       sessionId,
       provider,
       service: deps.service,
+      // The read-only tools the coach may call (spec §8.3).
+      db: deps.db,
+      learnerId: record.learnerId,
       learnerContext: deps.service.getLearnerContext(sessionId),
       difficulty: record.plannedDifficulty,
       warmupMs: deps.env.WARMUP_MS,

@@ -61,6 +61,13 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
   private readonly frameMs: number;
   private readonly now: () => number;
   private history: OpenAI.ChatCompletionMessageParam[] = [];
+  /**
+   * Read-only tools the model may call to ground its coaching in the
+   * learner's own state (spec §8.3). The executor is supplied by the API,
+   * which owns the database — this package does not know how the state is
+   * stored, only how to ask for it.
+   */
+  private toolExecutor?: (name: string) => unknown;
   private warmup = "";
   // Learner turns run one at a time, in arrival order. A second span can land
   // while turn 1 is still awaiting the (slow) LLM; without this chain two
@@ -84,6 +91,14 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
       timeout: 30_000,
       maxRetries: 0, // the provider's own one-shot retry is the only retry
     });
+  }
+
+  /**
+   * Registers the read-tool executor. Without one the model gets no read
+   * tools, so a provider used outside the API behaves exactly as before.
+   */
+  setToolExecutor(executor: (name: string) => unknown): void {
+    this.toolExecutor = executor;
   }
 
   async connect(onEvent: (e: ProviderEvent) => void): Promise<void> {
@@ -169,6 +184,16 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
    * local mode and only the timer-driven challenge did — the coach could see
    * an error but had no way to act on it mid-conversation.
    */
+  /**
+   * The read tools the model may call. Names must match the API's executor.
+   */
+  private static readonly READ_TOOLS = [
+    "get_learner_context",
+    "get_due_reviews",
+    "get_active_learning_objectives",
+    "get_recurring_errors",
+  ];
+
   private static readonly TOOLS = [
     {
       type: "function" as const,
@@ -263,18 +288,79 @@ export class LocalSpeechProvider implements SpeechConversationProvider {
     }
   }
 
+  /** The tools this provider offers: the two coaching tools, plus the read
+   *  tools when an executor was registered. */
+  private toolsFor(): { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }[] {
+    if (!this.toolExecutor) return LocalSpeechProvider.TOOLS;
+    return [
+      ...LocalSpeechProvider.TOOLS,
+      ...LocalSpeechProvider.READ_TOOLS.map((name) => ({
+        type: "function" as const,
+        function: {
+          name,
+          description: "Read the learner's own state to ground your coaching.",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      })),
+    ];
+  }
+
+  /**
+   * Runs a read tool the model asked for and feeds the result back.
+   *
+   * A read tool never mutates anything, so it is safe to answer immediately.
+   * An unknown or failing tool returns an error string rather than a
+   * fabricated result.
+   */
+  private async answerReadTool(call: { id: string; name: string; args: Record<string, unknown> }): Promise<void> {
+    let content: string;
+    try {
+      content = JSON.stringify(this.toolExecutor!(call.name));
+    } catch (e) {
+      content = JSON.stringify({ error: e instanceof Error ? e.message : "tool failed" });
+    }
+    this.history.push({
+      role: "tool",
+      tool_call_id: call.id,
+      content,
+    });
+  }
+
   /** Two attempts total (the SDK retries 0). Returns null when both fail. */
   private async callLLM(): Promise<LlmReply | null> {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await this.client.chat.completions.create(
-          { model: this.opts.llmModel, messages: this.history, tools: LocalSpeechProvider.TOOLS },
+          { model: this.opts.llmModel, messages: this.history, tools: this.toolsFor() },
           { timeout: 60_000 }, // request option (2nd arg) — the create body type has no `timeout` field
         );
         const message = res.choices[0]?.message;
         const toolCall = message?.tool_calls?.[0];
         if (toolCall?.function?.name) {
           const rawName = toolCall.function.name;
+          // A read tool is answered and the turn continues — it is a question,
+          // not a coaching decision.
+          if (LocalSpeechProvider.READ_TOOLS.includes(rawName)) {
+            if (!this.toolExecutor) {
+              return { content: typeof message?.content === "string" ? message.content : "" };
+            }
+            this.history.push({
+              role: "assistant",
+              content: typeof message?.content === "string" ? message.content : "",
+              tool_calls: [{
+                id: toolCall.id ?? `call-${rawName}`,
+                type: "function",
+                function: { name: rawName, arguments: JSON.stringify(toolCall.function.arguments ? parseArgs(toolCall.function.arguments) : {}) },
+              }],
+            });
+            await this.answerReadTool({
+              id: toolCall.id ?? `call-${rawName}`,
+              name: rawName,
+              args: parseArgs(toolCall.function.arguments),
+            });
+            // Ask the model again now that it has the answer.
+            return await this.callLLM();
+          }
           // Only the two coaching tools are known here; an unknown name from
           // the model is ignored rather than forwarded to the bridge.
           if (rawName !== "request_micro_coaching" && rawName !== "request_target_retry") {

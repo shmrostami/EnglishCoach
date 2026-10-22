@@ -4,6 +4,8 @@ import { SKILL_CODES } from "@ec/domain";
 import type { SpeechConversationProvider, ProviderEvent, TranscriptTurn } from "@ec/openai";
 import { renderPrompt } from "@ec/prompts";
 import type { SessionService } from "../services/session.js";
+import { runReadTool } from "../tools/llm-tools.js";
+import type { DrizzleDb } from "@ec/db";
 
 export type ClientMessage =
   | { t: "audio"; data: string }
@@ -26,6 +28,13 @@ interface BridgeOpts {
   sessionTargetMs: number;
   onEnded: (result: { state: SessionState }) => void;
   onCleanup?: (sessionId: string) => void;
+  /**
+   * The database and learner id, for the read-only tools the coach may call.
+   * Optional: without them the coach gets no read tools, which is how a
+   * bridge built outside the API (the tests) behaves.
+   */
+  db?: DrizzleDb;
+  learnerId?: string;
 }
 
 export class RealtimeBridge {
@@ -60,6 +69,19 @@ export class RealtimeBridge {
   detach(): void { this.client = null; }
 
   private start(): void {
+    // The read tools let the coach ground itself in the learner's own state
+    // (spec §8.3). They are read-only and take no arguments, so there is
+    // nothing for the model to reach that it should not.
+    const withTools = this.opts.provider as SpeechConversationProvider & {
+      setToolExecutor?: (executor: (name: string) => unknown) => void;
+    };
+    const db = this.opts.db;
+    const learnerId = this.opts.learnerId;
+    if (db && learnerId) {
+      withTools.setToolExecutor?.((name) =>
+        runReadTool({ db, learnerId, learnerContext: this.opts.learnerContext }, name),
+      );
+    }
     void this.opts.provider.connect((e) => this.handleProviderEvent(e));
     const instructions = renderPrompt("conversation", {
       learner_context: JSON.stringify(this.opts.learnerContext),

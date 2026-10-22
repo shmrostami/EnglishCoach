@@ -90,6 +90,8 @@ export interface LearnerProfile {
 
 export interface SessionRecord {
   id: string;
+  /** Who owns the session — needed to scope the learner's own state. */
+  learnerId: string;
   state: SessionState;
   topic: string;
   plannedDifficulty: number;

@@ -126,6 +126,10 @@ All under `apps/api/src/routes/`. Any learner other than `learner-1` returns 404
 | POST | `/v1/sessions/:id/end` | Ends once (409 on repeat), → `CLOSING`→`ANALYZING`, computes metrics, enqueues `analyze`, tears down the live bridge and releases the cached provider. |
 | POST | `/v1/sessions/:id/analyze` | Re-queues a failed analysis. Resets the existing job row (`UNIQUE(session_id,type)` makes a fresh insert impossible) or enqueues one when there is none. `409` for an already-analyzed session. Returns `{state:"QUEUED", sessionId}`. |
 | GET | `/v1/jobs/failed` | Failed jobs, newest first, each with its attempt history (`attempt`, `status`, `errorClass`, `error`, timestamps). |
+| GET | `/v1/sessions/:id/pronunciation` | The acoustic assessment: intelligibility, stress, rhythm, confidence and the rubric version. `pronunciation: null` when there was no audio to measure — the honest "not assessed". |
+| GET | `/v1/sessions/:id/difficulty` | The six-part difficulty profile (vocabulary, grammar, speed, abstraction, pressure, familiarity) plus the composite. `difficulty: null` before analysis. |
+| GET | `/v1/learners/:id/vocabulary` | The learner's canonical vocabulary with recognition, recall and production reported separately. |
+| GET | `/v1/learners/:id/activities/types` | The five Phase 3 modalities with their input/output, the skills each can evidence, and its rubric version. |
 | GET | `/v1/sessions/:id/feedback` | Persisted post-session feedback: scores, `notAssessed` dimensions, strengths, stored corrections (with `learnerAction`), vocabulary, and the active plan's topic/targets/reason as `next`. A session that is not analysed yet answers `200` with `feedback: null` and its `state`; unknown session is `404`. |
 | GET | `/v1/learners/:id/objectives` | Objectives, highest priority first. |
 | POST | `/v1/learners/:id/objectives` | Requires `title` + `description`; status `active`. 201 `{id}`. |
@@ -300,23 +304,23 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 
 | Design item | Status | Reality |
 |---|---|---|
-| §24 Pronunciation architecture | **design-only** | Nothing is measured. No phoneme, IPA, accent or acoustic pipeline exists. The `pronunciation` score is now `null` ("not assessed") unless an analysis provider declares `capabilities.pronunciationEvidence` — no current provider does — and the analysis prompt now requires `"pronunciation": null`. The three `pronunciation.*` skill codes still exist but nothing feeds them. |
+| §24 Pronunciation architecture | **partial** | Real acoustic measurement now exists (`packages/learning-engine/src/pronunciation.ts`): the local provider retains the endpoint-gated audio of each learner turn, the bridge stores it as `audio_evidence`, and the worker measures intelligibility, stress and rhythm from the samples with a confidence that grows with usable audio. **Not** phoneme-level: no IPA, no accent scoring, no phoneme error detail — the rubric is named `acoustic-prosody-v1` and says so. A provider's own pronunciation number is always stripped; only the measurement counts (§12.1). The OpenAI Realtime provider does not retain samples, so its sessions stay `null`. |
 | §12–13 `UPDATE_MEMORY` / `PLAN_NEXT` states | **not states** | Implemented as jobs, not session states. |
 | §18 memory-update prompt | **removed** | The `memory` prompt was registered but never called, and spec §16.5 forbids an LLM mutating authoritative learner state. Deleted rather than wired. |
-| §21 LLM tool layer | **not implemented** | Design lists seven tools; only `request_micro_coaching` and `request_target_retry` exist, and memory is written by the engine, not the model. |
-| §30 session types | **not implemented** | Only traces are `role_play`/`storytelling` as intervention-type values. No rotation. |
-| §10 conversation difficulty decomposition | **partial** | One scalar 0–1 adjusted in ±.02/.05 steps; the six-part decomposition is absent. |
-| §6 vocabulary memory | **partial** | Schema complete. The worker picks the word with `/[a-zA-Z]{4,}/g` from `vocabulary_use` evidence, only ever updates `productionMastery`; recognition stays 0.3, collocation 0, exposure 0. |
+| §21 LLM tool layer | **partial** | The two coaching tools (`request_micro_coaching`, `request_target_retry`) work in both `openai` and `local` mode, and four READ tools exist (`get_learner_context`, `get_due_reviews`, `get_active_learning_objectives`, `get_recurring_errors`) so the coach can ground itself in the learner's state. Deliberately absent: anything that writes learner state — spec §16.5 forbids an LLM mutating authoritative state, so memory and targets stay with the engine. |
+| §30 session types | **implemented** | Six modes with their own COGNITIVE DEMAND (`packages/learning-engine/src/session-types.ts`): conversation, storytelling, role play, problem solving, opinion/debate, professional simulation. The planner picks the most demanding mode the learner can handle and rotates it, and renders the topic through the mode's template. |
+| §10 conversation difficulty decomposition | **implemented** | `decomposeDifficulty` computes all six components the design names — vocabulary complexity, grammatical complexity, speech speed, abstraction, interaction pressure, topic familiarity — from the transcript and the deterministic metrics. Stored per session in `difficulty_profiles`, so the composite the planner used can be explained component by component. |
+| §6 vocabulary memory | **implemented** | Canonical items (`vocabulary_items_canonical`, keyed by lemma + sense) are separate from the learner's state (`vocabulary_state`). Recognition, recall and production move independently. `lemmaCandidates` resolves a surface form against what exists, so "negotiated" and "negotiate" are one item. |
 | §29 priority formula | **implemented** | `prioritization.ts`, exact design weights. |
 | §11 adaptive difficulty | **implemented** | `difficulty.ts`; no hysteresis. |
-| Spaced vocabulary review | **partial** | Due queue, attempts and rescheduling are implemented (`interval-v1`). The scheduler is a documented interval policy, **not** SM-2 or FSRS. Review is button-driven in the UI, not a spoken or typed recall exercise. |
+| Spaced vocabulary review | **partial** | Due queue, attempts and rescheduling are implemented (`interval-v1`), over the canonical items and their three masteries. The scheduler is a documented interval policy, **not** SM-2 or FSRS. Review is button-driven in the UI, not a spoken or typed recall exercise. |
 | Goal decomposition | **implemented** | `goal_milestones` + suggestion from real weak skills; status is re-derived on read. |
 | Dashboard recurring errors | **implemented** | `GET /v1/learners/:id/errors` + the Review page section; `trend` stays `null` under two sessions of evidence. |
 | Correction accept/dismiss | **implemented** | `PATCH /v1/sessions/:id/corrections/:correctionId` plus Got it / Dismiss buttons on the review page, applied optimistically and reverted on failure. |
-| Learning objectives / activity attempts | **partial** | Objectives, one activity type (`guided_speaking`) and attempts exist. No curriculum units, no sequencing, and no other activity type. |
-| Diagnostic onboarding | **partial** | A three-question self-report placement exists and is stored. It is not an assessment and does not touch skill mastery. Broader modalities (listening, reading, writing, dictation) are still absent. |
+| Learning objectives / activity attempts | **partial** | Objectives, attempts and `guided_speaking` exist, and the five Phase 3 modalities (listening, reading, writing, dictation, pronunciation) each have their own rubric and evidence contract. No curriculum units and no sequencing between activities. |
+| Diagnostic onboarding | **partial** | A three-question self-report placement exists and is stored. It is not an assessment and does not touch skill mastery. |
 | Level history / per-dimension trends | **implemented** | `GET /v1/learners/:id/level-history` + a Dashboard section; a dimension never assessed twice reports `null`, not a flat line. |
-| §25/§32 V2–V4 roadmap | **not implemented** | Personalized curriculum, teacher dashboard, advanced pronunciation. |
+| §25/§32 V2–V4 roadmap | **not implemented** | Personalized curriculum, teacher dashboard, phoneme-level pronunciation. |
 | Redis / object storage / audio recordings / WebRTC | **out of scope by design** | Spec §1 non-goals. |
 
 ---
@@ -349,7 +353,7 @@ From `Docs/design.md`. Treat as unimplemented unless listed otherwise.
 
 ## 11. Tests
 
-`pnpm test` — 40 files, 272 tests, all passing (vitest). Includes an end-to-end pipeline test
+`pnpm test` — 44 files, 338 tests, all passing (vitest). Includes an end-to-end pipeline test
 (`apps/api/tests/e2e/pipeline.test.ts`) proving session → utterances → analysis → memory →
 plan → next-session targets, and a real-Python sidecar test.
 
